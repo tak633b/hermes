@@ -569,6 +569,71 @@ async def update_agent_status(agent_id: str, body: dict = Body(...)):
     return {"agent_id": agent_id, "status": new_status}
 
 
+@app.get("/agents/{agent_id}/metrics")
+async def get_agent_metrics(agent_id: str):
+    with get_db() as conn:
+        agent_row = conn.execute("SELECT id FROM agents WHERE id = ?", (agent_id,)).fetchone()
+        if not agent_row:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        rows = conn.execute(
+            "SELECT status, created_at, updated_at FROM tasks WHERE agent_id = ?",
+            (agent_id,)
+        ).fetchall()
+
+    tasks = [dict(r) for r in rows]
+    total_tasks = len(tasks)
+    completed_tasks = sum(1 for t in tasks if t["status"] == "completed")
+    failed_tasks = sum(1 for t in tasks if t["status"] == "failed")
+    completion_rate = round(completed_tasks / total_tasks * 100, 1) if total_tasks > 0 else 0.0
+    error_rate = round(failed_tasks / total_tasks * 100, 1) if total_tasks > 0 else 0.0
+
+    durations = []
+    for t in tasks:
+        if t["status"] == "completed" and t["created_at"] and t["updated_at"]:
+            try:
+                created = datetime.fromisoformat(t["created_at"])
+                updated = datetime.fromisoformat(t["updated_at"])
+                diff = (updated - created).total_seconds()
+                if diff >= 0:
+                    durations.append(diff)
+            except Exception:
+                pass
+    avg_duration_seconds = round(sum(durations) / len(durations), 2) if durations else 0.0
+
+    tasks_by_status: dict = {}
+    for t in tasks:
+        s = t["status"] or "unknown"
+        tasks_by_status[s] = tasks_by_status.get(s, 0) + 1
+
+    from datetime import timedelta
+    today = datetime.utcnow().date()
+    day_labels = [(today - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
+    day_counts_map: dict = {label: 0 for label in day_labels}
+    for t in tasks:
+        if t["created_at"]:
+            try:
+                d = datetime.fromisoformat(t["created_at"]).date().isoformat()
+                if d in day_counts_map:
+                    day_counts_map[d] += 1
+            except Exception:
+                pass
+    tasks_by_day = {
+        "labels": day_labels,
+        "values": [day_counts_map[d] for d in day_labels],
+    }
+
+    return {
+        "total_tasks": total_tasks,
+        "completed_tasks": completed_tasks,
+        "failed_tasks": failed_tasks,
+        "completion_rate": completion_rate,
+        "error_rate": error_rate,
+        "avg_duration_seconds": avg_duration_seconds,
+        "tasks_by_status": tasks_by_status,
+        "tasks_by_day": tasks_by_day,
+    }
+
+
 @app.put("/agents/{agent_id}/memory")
 async def update_agent_memory(agent_id: str, memory: AgentMemory):
     with get_db() as conn:

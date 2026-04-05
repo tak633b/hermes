@@ -1100,6 +1100,136 @@ async function showAgentDetail(agentId) {
             }
         }
 
+        // Metrics section
+        const metricsSection = document.createElement('div');
+        metricsSection.style.marginTop = '1.5rem';
+        const metricsTitle = document.createElement('h4');
+        metricsTitle.textContent = '📊 メトリクス';
+        metricsSection.appendChild(metricsTitle);
+        content.appendChild(metricsSection);
+
+        API.getAgentMetrics(agentId).then(function(metrics) {
+            // Text stats
+            const statsDiv = document.createElement('div');
+            statsDiv.style.cssText = 'display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:1rem;margin-top:0.5rem;';
+            [
+                ['完了率', metrics.completion_rate + '%'],
+                ['エラー率', metrics.error_rate + '%'],
+                ['平均処理時間', metrics.avg_duration_seconds + '秒'],
+                ['総タスク数', metrics.total_tasks],
+            ].forEach(function(item) {
+                const card = document.createElement('div');
+                card.style.cssText = 'background:#f7fafc;border-radius:6px;padding:0.6rem 1rem;min-width:120px;';
+                const label = document.createElement('div');
+                label.style.cssText = 'font-size:0.75rem;color:#718096;';
+                label.textContent = item[0];
+                const value = document.createElement('div');
+                value.style.cssText = 'font-size:1.2rem;font-weight:700;color:#2d3748;margin-top:2px;';
+                value.textContent = item[1];
+                card.appendChild(label);
+                card.appendChild(value);
+                statsDiv.appendChild(card);
+            });
+            metricsSection.appendChild(statsDiv);
+
+            // Charts row
+            const chartsRow = document.createElement('div');
+            chartsRow.style.cssText = 'display:flex;gap:1.5rem;flex-wrap:wrap;align-items:flex-start;';
+
+            // Doughnut chart (status breakdown)
+            const doughnutWrap = document.createElement('div');
+            doughnutWrap.style.cssText = 'background:#f7fafc;border-radius:8px;padding:1rem;flex:1;min-width:200px;max-width:260px;';
+            const doughnutLabel = document.createElement('div');
+            doughnutLabel.style.cssText = 'font-size:0.82rem;font-weight:600;color:#4a5568;margin-bottom:0.5rem;';
+            doughnutLabel.textContent = 'ステータス別内訳';
+            doughnutWrap.appendChild(doughnutLabel);
+            const doughnutCanvas = document.createElement('canvas');
+            doughnutCanvas.id = 'metrics-status-chart-' + agentId;
+            doughnutCanvas.style.cssText = 'max-height:200px;';
+            doughnutWrap.appendChild(doughnutCanvas);
+            chartsRow.appendChild(doughnutWrap);
+
+            // Bar chart (tasks by day)
+            const barWrap = document.createElement('div');
+            barWrap.style.cssText = 'background:#f7fafc;border-radius:8px;padding:1rem;flex:2;min-width:260px;';
+            const barLabel = document.createElement('div');
+            barLabel.style.cssText = 'font-size:0.82rem;font-weight:600;color:#4a5568;margin-bottom:0.5rem;';
+            barLabel.textContent = '直近7日間 タスク作成数';
+            barWrap.appendChild(barLabel);
+            const barCanvas = document.createElement('canvas');
+            barCanvas.id = 'metrics-day-chart-' + agentId;
+            barCanvas.style.cssText = 'max-height:200px;';
+            barWrap.appendChild(barCanvas);
+            chartsRow.appendChild(barWrap);
+
+            metricsSection.appendChild(chartsRow);
+
+            // Render charts after DOM insertion
+            setTimeout(function() {
+                const statusData = metrics.tasks_by_status || {};
+                const statusLabels = Object.keys(statusData);
+                const statusValues = statusLabels.map(function(k) { return statusData[k]; });
+                const statusColors = {
+                    completed: '#48bb78',
+                    failed: '#fc8181',
+                    running: '#63b3ed',
+                    pending: '#f6e05e',
+                };
+                const doughnutColors = statusLabels.map(function(k) { return statusColors[k] || '#cbd5e0'; });
+
+                if (statusLabels.length > 0) {
+                    new Chart(doughnutCanvas, {
+                        type: 'doughnut',
+                        data: {
+                            labels: statusLabels,
+                            datasets: [{
+                                data: statusValues,
+                                backgroundColor: doughnutColors,
+                                borderWidth: 1,
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } },
+                        }
+                    });
+                } else {
+                    doughnutCanvas.style.display = 'none';
+                    const noData = document.createElement('p');
+                    noData.className = 'empty';
+                    noData.textContent = 'データなし';
+                    doughnutWrap.appendChild(noData);
+                }
+
+                const dayData = metrics.tasks_by_day || { labels: [], values: [] };
+                new Chart(barCanvas, {
+                    type: 'bar',
+                    data: {
+                        labels: dayData.labels,
+                        datasets: [{
+                            label: 'タスク数',
+                            data: dayData.values,
+                            backgroundColor: '#63b3ed',
+                            borderRadius: 4,
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: { beginAtZero: true, ticks: { stepSize: 1, font: { size: 11 } } },
+                            x: { ticks: { font: { size: 10 } } },
+                        },
+                        plugins: { legend: { display: false } },
+                    }
+                });
+            }, 50);
+        }).catch(function() {
+            const errP = document.createElement('p');
+            errP.style.cssText = 'color:#718096;font-size:0.85rem;';
+            errP.textContent = 'メトリクスを取得できませんでした';
+            metricsSection.appendChild(errP);
+        });
+
         modal.classList.add('active');
     } catch (error) {
         alert('エージェント情報の取得に失敗しました: ' + error.message);

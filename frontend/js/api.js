@@ -48,6 +48,10 @@ class API {
         return this.request(`/agents/${id}/memory`);
     }
 
+    static getAgentMetrics(id) {
+        return this.request(`/agents/${id}/metrics`);
+    }
+
     static updateAgentParameters(id, parameters) {
         return this.request(`/agents/${id}/parameters`, {
             method: 'PUT',

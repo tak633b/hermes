@@ -1,9 +1,25 @@
+// リアルタイムログポーリング用
+let agentLogInterval = null;
+let currentAgentId = null;
+
+async function refreshAgentLogs(agentId, logPre) {
+    try {
+        const logs = await API.getAgentLogs(agentId);
+        if (logs.length === 0) {
+            logPre.textContent = '（ログがありません）';
+        } else {
+            logPre.textContent = logs.map(l => '[' + l.timestamp + '] [' + l.level.toUpperCase() + '] ' + l.message).join('\n');
+            logPre.scrollTop = logPre.scrollHeight;
+        }
+    } catch (_e) {}
+}
+
 // ページ読み込み時
 document.addEventListener('DOMContentLoaded', () => {
     initializeApp();
     loadDashboard();
     setupEventListeners();
-    
+
     // 5秒ごとにステータスを更新
     setInterval(updateDashboard, 5000);
 });
@@ -299,12 +315,33 @@ function displayTasks(tasks) {
     }).join('');
 }
 
-async function showAgentDetail(agentId) {
+async function refreshAgentLogs(agentId, logPre) {
     try {
-        const [agent, logs, memory] = await Promise.all([
+        const logs = await API.getAgentLogs(agentId);
+        if (logs.length === 0) {
+            logPre.textContent = '（ログがありません）';
+        } else {
+            const text = logs.map(l => `[${l.timestamp}] [${l.level.toUpperCase()}] ${l.message}`).join('\n');
+            logPre.textContent = text;
+            logPre.scrollTop = logPre.scrollHeight;
+        }
+    } catch (_e) {}
+}
+
+async function showAgentDetail(agentId) {
+    // 前のポーリングを停止
+    if (agentLogInterval) {
+        clearInterval(agentLogInterval);
+        agentLogInterval = null;
+    }
+    currentAgentId = agentId;
+
+    try {
+        const [agent, logs, memory, agentTasks] = await Promise.all([
             API.getAgent(agentId),
             API.getAgentLogs(agentId),
-            API.getAgentMemory(agentId)
+            API.getAgentMemory(agentId),
+            API.getTasks(agentId)
         ]);
 
         const modal = document.getElementById('agent-modal');
@@ -369,24 +406,99 @@ async function showAgentDetail(agentId) {
         }
         content.appendChild(memSection);
 
-        // Logs
+        // Tasks section
+        const taskSection = document.createElement('div');
+        taskSection.style.marginTop = '1.5rem';
+        const taskSectionTitle = document.createElement('h4');
+        taskSectionTitle.textContent = 'タスク一覧 (' + agentTasks.length + '件)';
+        taskSection.appendChild(taskSectionTitle);
+        if (agentTasks.length === 0) {
+            const pEmpty = document.createElement('p');
+            pEmpty.className = 'empty';
+            pEmpty.textContent = 'タスクがありません';
+            taskSection.appendChild(pEmpty);
+        } else {
+            const taskTable = document.createElement('table');
+            taskTable.style.cssText = 'width:100%;border-collapse:collapse;font-size:0.85rem;margin-top:0.5rem;';
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            headerRow.style.cssText = 'background:#edf2f7;text-align:left;';
+            ['タイトル', 'ステータス', '進捗', '更新日時'].forEach(label => {
+                const th = document.createElement('th');
+                th.style.padding = '6px 8px';
+                th.textContent = label;
+                headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+            taskTable.appendChild(thead);
+            const tbody = document.createElement('tbody');
+            agentTasks.forEach((t, i) => {
+                const tr = document.createElement('tr');
+                tr.style.cssText = (i % 2 === 0 ? 'background:#fff;' : 'background:#f7fafc;') + 'cursor:pointer;';
+                tr.addEventListener('click', () => { closeModal('agent-modal'); showTaskDetail(t.id); });
+
+                const tdTitle = document.createElement('td');
+                tdTitle.style.padding = '5px 8px';
+                tdTitle.textContent = t.title;
+                tr.appendChild(tdTitle);
+
+                const tdStatus = document.createElement('td');
+                tdStatus.style.padding = '5px 8px';
+                const span = document.createElement('span');
+                span.className = 'card-status status-' + t.status;
+                span.textContent = t.status;
+                tdStatus.appendChild(span);
+                tr.appendChild(tdStatus);
+
+                const tdProgress = document.createElement('td');
+                tdProgress.style.padding = '5px 8px';
+                tdProgress.textContent = t.progress + '%';
+                tr.appendChild(tdProgress);
+
+                const tdUpdated = document.createElement('td');
+                tdUpdated.style.cssText = 'padding:5px 8px;font-size:0.8rem;';
+                tdUpdated.textContent = t.updated_at ? new Date(t.updated_at).toLocaleString('ja-JP') : '-';
+                tr.appendChild(tdUpdated);
+
+                tbody.appendChild(tr);
+            });
+            taskTable.appendChild(tbody);
+            taskSection.appendChild(taskTable);
+        }
+        content.appendChild(taskSection);
+
+        // Logs with real-time polling
         const logSection = document.createElement('div');
         logSection.style.marginTop = '1.5rem';
+        const logTitleRow = document.createElement('div');
+        logTitleRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;';
         const logTitle = document.createElement('h4');
-        logTitle.textContent = 'ログ';
-        logSection.appendChild(logTitle);
+        logTitle.textContent = 'ログ（リアルタイム更新）';
+        logTitle.style.margin = '0';
+        logTitleRow.appendChild(logTitle);
+        const liveIndicator = document.createElement('span');
+        liveIndicator.style.cssText = 'font-size:0.75rem;color:#48bb78;';
+        liveIndicator.textContent = '● LIVE';
+        logTitleRow.appendChild(liveIndicator);
+        logSection.appendChild(logTitleRow);
+        const logPre = document.createElement('pre');
+        logPre.style.cssText = 'background:#1a202c;color:#e2e8f0;padding:1rem;border-radius:4px;overflow-x:auto;font-size:0.8rem;max-height:300px;overflow-y:auto;margin-top:0.5rem;';
         if (logs.length === 0) {
-            const p = document.createElement('p');
-            p.className = 'empty';
-            p.textContent = 'ログがありません';
-            logSection.appendChild(p);
+            logPre.textContent = '（ログがありません）';
         } else {
-            const logPre = document.createElement('pre');
-            logPre.style.cssText = 'background:#1a202c;color:#e2e8f0;padding:1rem;border-radius:4px;overflow-x:auto;font-size:0.8rem;max-height:300px;overflow-y:auto;';
-            logPre.textContent = logs.map(l => `[${l.timestamp}] [${l.level.toUpperCase()}] ${l.message}`).join('\n');
-            logSection.appendChild(logPre);
+            logPre.textContent = logs.map(l => '[' + l.timestamp + '] [' + l.level.toUpperCase() + '] ' + l.message).join('\n');
+            setTimeout(() => { logPre.scrollTop = logPre.scrollHeight; }, 50);
         }
+        logSection.appendChild(logPre);
         content.appendChild(logSection);
+
+        agentLogInterval = setInterval(() => {
+            if (currentAgentId === agentId) {
+                refreshAgentLogs(agentId, logPre);
+            } else {
+                clearInterval(agentLogInterval);
+            }
+        }, 3000);
 
         // agent-whisper traces section
         const awSection = document.createElement('div');
@@ -531,6 +643,12 @@ async function retryTask(taskId) {
 function closeModal(modalId) {
     const id = modalId || 'task-modal';
     document.getElementById(id).classList.remove('active');
+    // モーダルを閉じたらポーリング停止
+    if (agentLogInterval) {
+        clearInterval(agentLogInterval);
+        agentLogInterval = null;
+    }
+    currentAgentId = null;
 }
 
 function escapeHtml(text) {

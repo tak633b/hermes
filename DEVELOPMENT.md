@@ -126,14 +126,23 @@ CREATE TABLE task_logs (
 ### Phase 1: Foundation (✅ Complete)
 - [x] Hermes フルスタック実装
 - [x] SQLite 永続化
-- [x] Discord Webhook 通知
-- [x] agent-whisper トレース連携
-- [x] Hermes ヘルスビュー
+- [x] Discord Webhook 通知（フルUUID + 完了 curl コマンド埋め込み）
+- [x] agent-whisper トレース連携（`agent.name` ベース検索）
+- [x] Hermes ヘルスビュー（`AW_BASE_URL` 経由で agent-whisper 接続）
+- [x] WebSocket リアルタイム更新（エージェントバッジ・タスク状態）
+- [x] ブラウザネイティブ通知（`task_created` イベント時）
+- [x] hermes-task-poller Cron 登録（`*/15 * * * *`）
+
+### Phase 1.5: UX Fixes (✅ Complete — 2026-04-06)
+- [x] タスク作成後に Tasks タブへ自動切り替え（`fix: 5179676`）
+- [x] タスク一覧にエージェント名を表示（UUID → 名前、`fix: fe7766b`）
+- [x] alert() を Toast 通知に置き換え
 
 ### Phase 2: Autonomous Execution (🔄 In Progress)
 - [ ] **Task Execution Engine** — `tool_calls` フィールドをパース → サブエージェント自動起動
 - [ ] **Smart Task Retry** — 失敗時のリトライロジック強化（指数バックオフ）
 - [ ] **Task Templates** — よく使うタスク（「レポート作成」「コード審査」）をテンプレート化
+- [ ] **Task Status Quick Update** — 一覧画面でステータスを直接変更できるボタン
 
 ### Phase 3: Intelligence (📋 Future)
 - [ ] **Priority Learning** — タスク優先度の自動推定（過去の完了時間から）

@@ -807,6 +807,99 @@ async def get_agent_whisper_traces(agent_id: Optional[str] = Query(None)):
         raise HTTPException(status_code=500, detail=f"Error fetching traces: {str(e)}")
 
 
+@app.post("/tasks/{task_id}/progress")
+async def report_task_progress(task_id: str, body: dict = Body(...)):
+    """
+    エージェントからタスク進捗レポートを受け取るエンドポイント。
+    body: {
+        "progress": 0-100 (int),
+        "message": "進捗メッセージ" (str, optional),
+        "status": "running|completed|failed" (str, optional)
+    }
+    """
+    progress = body.get("progress")
+    message = body.get("message", "")
+    new_status = body.get("status")
+    updated_at = datetime.utcnow().isoformat()
+
+    if progress is not None and not (0 <= int(progress) <= 100):
+        raise HTTPException(status_code=400, detail="progress must be 0-100")
+
+    with get_db() as conn:
+        row = conn.execute("SELECT id, status FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        if progress is not None and new_status:
+            conn.execute(
+                "UPDATE tasks SET progress=?, status=?, updated_at=? WHERE id=?",
+                (int(progress), new_status, updated_at, task_id)
+            )
+        elif progress is not None:
+            conn.execute(
+                "UPDATE tasks SET progress=?, updated_at=? WHERE id=?",
+                (int(progress), updated_at, task_id)
+            )
+        elif new_status:
+            conn.execute(
+                "UPDATE tasks SET status=?, updated_at=? WHERE id=?",
+                (new_status, updated_at, task_id)
+            )
+
+        if message:
+            _add_task_log(conn, task_id, "INFO", message)
+
+    await ws_manager.broadcast({
+        "event": "task_progress",
+        "task_id": task_id,
+        "progress": progress,
+        "status": new_status,
+        "message": message,
+        "updated_at": updated_at,
+    })
+
+    return {"task_id": task_id, "progress": progress, "status": new_status, "updated_at": updated_at}
+
+
+@app.post("/tasks/{task_id}/logs")
+async def add_task_log(task_id: str, body: dict = Body(...)):
+    """
+    エージェントからタスクログを追加するエンドポイント。
+    body: {
+        "level": "INFO|WARN|ERROR" (str),
+        "message": "ログメッセージ" (str),
+        "tool_name": "ツール名" (str, optional),
+        "tool_args": "ツール引数" (str, optional),
+        "tool_result": "ツール結果" (str, optional)
+    }
+    """
+    level = body.get("level", "INFO")
+    message = body.get("message", "")
+    tool_name = body.get("tool_name")
+    tool_args = body.get("tool_args")
+    tool_result = body.get("tool_result")
+
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required")
+
+    with get_db() as conn:
+        row = conn.execute("SELECT id FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        _add_task_log(conn, task_id, level, message, tool_name, tool_args, tool_result)
+
+    await ws_manager.broadcast({
+        "event": "task_log",
+        "task_id": task_id,
+        "level": level,
+        "message": message,
+        "tool_name": tool_name,
+    })
+
+    return {"task_id": task_id, "status": "logged"}
+
+
 @app.get("/status", response_model=SystemStatus)
 async def get_status():
     with get_db() as conn:

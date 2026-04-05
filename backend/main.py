@@ -553,6 +553,42 @@ async def retry_task(task_id: str, background_tasks: BackgroundTasks):
     return {"status": "retried", "task_id": task_id}
 
 
+VALID_TASK_STATUSES = {"pending", "running", "completed", "failed", "cancelled"}
+
+
+@app.put("/tasks/{task_id}/status")
+async def update_task_status(task_id: str, body: dict = Body(...)):
+    """Update task status. Body: {"status": "running"|"completed"|"failed"|"cancelled"}"""
+    new_status = body.get("status")
+    if not new_status or new_status not in VALID_TASK_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Must be one of: {', '.join(sorted(VALID_TASK_STATUSES))}"
+        )
+
+    updated_at = datetime.utcnow().isoformat()
+    # Auto-set progress based on status
+    progress_map = {"running": 50, "completed": 100, "failed": None, "cancelled": None, "pending": 0}
+    progress_val = progress_map.get(new_status)
+
+    with get_db() as conn:
+        row = conn.execute("SELECT id FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if progress_val is not None:
+            conn.execute(
+                "UPDATE tasks SET status=?, progress=?, updated_at=? WHERE id=?",
+                (new_status, progress_val, updated_at, task_id)
+            )
+        else:
+            conn.execute(
+                "UPDATE tasks SET status=?, updated_at=? WHERE id=?",
+                (new_status, updated_at, task_id)
+            )
+
+    return {"task_id": task_id, "status": new_status, "updated_at": updated_at}
+
+
 @app.get("/status", response_model=SystemStatus)
 async def get_status():
     with get_db() as conn:

@@ -1890,37 +1890,113 @@ function renderTimeline(container, items) {
 }
 
 
+function makeEl(tag, styles, text) {
+    const el = document.createElement(tag);
+    if (styles) el.style.cssText = styles;
+    if (text !== undefined) el.textContent = text;
+    return el;
+}
+
 async function loadHealth() {
     const container = document.getElementById('health-content');
-    container.innerHTML = '<p class="empty">読み込み中...</p>';
-    const healthData = await API.getAgentsHealth();
-    if (!healthData || healthData.length === 0) {
-        container.innerHTML = '<p class="empty">エージェントなし</p>';
+    setEmptyMessage(container, '読み込み中...');
+    let healthData;
+    try {
+        healthData = await API.getAgentsHealth();
+    } catch (e) {
+        setEmptyMessage(container, `エラー: ${e.message}`);
         return;
     }
-    container.innerHTML = '';
-    const grid = document.createElement('div');
-    grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1rem;';
+    if (!healthData || healthData.length === 0) {
+        setEmptyMessage(container, 'エージェントなし');
+        return;
+    }
+
+    container.textContent = '';
+
+    // Summary chips row
+    const totalTasks = healthData.reduce((s, a) => s + a.total_tasks, 0);
+    const totalCompleted = healthData.reduce((s, a) => s + a.completed_tasks, 0);
+    const totalFailed = healthData.reduce((s, a) => s + a.failed_tasks, 0);
+    const activeCount = healthData.filter(a => a.status === 'running').length;
+    const summaryBar = makeEl('div', 'display:flex;gap:1rem;margin-bottom:1.25rem;flex-wrap:wrap;');
+    [
+        { label: 'エージェント数', value: healthData.length, color: '#7c83fd' },
+        { label: 'アクティブ', value: activeCount, color: '#50fa7b' },
+        { label: '総タスク', value: totalTasks, color: '#f8f8f2' },
+        { label: '完了', value: totalCompleted, color: '#50fa7b' },
+        { label: '失敗', value: totalFailed, color: totalFailed > 0 ? '#ff5555' : '#6272a4' },
+    ].forEach(({ label, value, color }) => {
+        const chip = makeEl('div', 'background:#1e1e2e;border:1px solid #444;border-radius:8px;padding:0.5rem 1rem;text-align:center;min-width:80px;');
+        const num = makeEl('div', `font-size:1.4rem;font-weight:bold;color:${color};`, String(value));
+        const lbl = makeEl('div', 'font-size:0.72rem;color:#6272a4;margin-top:2px;', label);
+        chip.appendChild(num);
+        chip.appendChild(lbl);
+        summaryBar.appendChild(chip);
+    });
+    container.appendChild(summaryBar);
+
+    // Agent cards grid
+    const grid = makeEl('div', 'display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:1rem;');
     healthData.forEach(agent => {
-        const card = document.createElement('div');
-        card.style.cssText = 'background:#1e1e2e;border:1px solid #333;border-radius:8px;padding:1rem;';
         const statusColor = agent.status === 'running' ? '#50fa7b' : agent.status === 'error' ? '#ff5555' : '#6272a4';
         const errorColor = agent.error_rate > 20 ? '#ff5555' : agent.error_rate > 5 ? '#ffb86c' : '#50fa7b';
+        const completionRate = agent.total_tasks > 0 ? Math.round(agent.completed_tasks / agent.total_tasks * 100) : 0;
         const lastAct = agent.aw_last_trace_at || agent.last_task_at;
         const lastActStr = lastAct ? new Date(lastAct).toLocaleString('ja-JP') : 'なし';
-        card.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
-                <strong style="font-size:1rem;">${agent.agent_name}</strong>
-                <span style="background:${statusColor}22;color:${statusColor};border:1px solid ${statusColor};border-radius:4px;padding:2px 8px;font-size:0.75rem;">${agent.status}</span>
-            </div>
-            <table style="width:100%;font-size:0.82rem;border-collapse:collapse;">
-                <tr><td style="color:#6272a4;padding:2px 0;">エラー率</td><td style="color:${errorColor};text-align:right;font-weight:bold;">${agent.error_rate}%</td></tr>
-                <tr><td style="color:#6272a4;padding:2px 0;">総タスク</td><td style="text-align:right;">${agent.total_tasks}</td></tr>
-                <tr><td style="color:#6272a4;padding:2px 0;">完了</td><td style="color:#50fa7b;text-align:right;">${agent.completed_tasks}</td></tr>
-                <tr><td style="color:#6272a4;padding:2px 0;">失敗</td><td style="color:#ff5555;text-align:right;">${agent.failed_tasks}</td></tr>
-                <tr><td style="color:#6272a4;padding:2px 0;">最終活動</td><td style="text-align:right;font-size:0.75rem;">${lastActStr}</td></tr>
-            </table>
-        `;
+        const awStr = agent.aw_last_trace_at ? new Date(agent.aw_last_trace_at).toLocaleString('ja-JP') : 'なし';
+
+        const card = makeEl('div', `background:#1e1e2e;border:1px solid #333;border-left:3px solid ${statusColor};border-radius:8px;padding:1rem;transition:box-shadow 0.2s;cursor:default;`);
+        card.addEventListener('mouseover', () => { card.style.boxShadow = `0 0 12px ${statusColor}44`; });
+        card.addEventListener('mouseout', () => { card.style.boxShadow = 'none'; });
+
+        // Header: name + status badge
+        const header = makeEl('div', 'display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;');
+        header.appendChild(makeEl('strong', 'font-size:1.05rem;', agent.agent_name));
+        const badge = makeEl('span', `background:${statusColor}22;color:${statusColor};border:1px solid ${statusColor}66;border-radius:12px;padding:2px 10px;font-size:0.72rem;font-weight:bold;letter-spacing:0.05em;`, agent.status.toUpperCase());
+        header.appendChild(badge);
+        card.appendChild(header);
+
+        // Progress bar
+        const progressSection = makeEl('div', 'margin-bottom:0.75rem;');
+        const progressLabel = makeEl('div', 'display:flex;justify-content:space-between;font-size:0.78rem;color:#6272a4;margin-bottom:4px;');
+        progressLabel.appendChild(makeEl('span', null, 'タスク完了率'));
+        progressLabel.appendChild(makeEl('span', 'color:#f8f8f2;font-weight:bold;', `${completionRate}%`));
+        progressSection.appendChild(progressLabel);
+        const barBg = makeEl('div', 'background:#333;border-radius:4px;height:6px;overflow:hidden;');
+        const barFill = makeEl('div', `height:100%;width:${completionRate}%;background:linear-gradient(90deg,#7c83fd,#50fa7b);border-radius:4px;transition:width 0.5s;`);
+        barBg.appendChild(barFill);
+        progressSection.appendChild(barBg);
+        card.appendChild(progressSection);
+
+        // Stats grid (総数/完了/失敗)
+        const statsGrid = makeEl('div', 'display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.75rem;text-align:center;');
+        [
+            { n: agent.total_tasks, label: '総数', color: '#f8f8f2' },
+            { n: agent.completed_tasks, label: '完了', color: '#50fa7b' },
+            { n: agent.failed_tasks, label: '失敗', color: agent.failed_tasks > 0 ? '#ff5555' : '#6272a4' },
+        ].forEach(({ n, label, color }) => {
+            const cell = makeEl('div', 'background:#252535;border-radius:6px;padding:0.4rem;');
+            cell.appendChild(makeEl('div', `font-size:1.1rem;font-weight:bold;color:${color};`, String(n)));
+            cell.appendChild(makeEl('div', 'font-size:0.68rem;color:#6272a4;', label));
+            statsGrid.appendChild(cell);
+        });
+        card.appendChild(statsGrid);
+
+        // Footer: error rate + AW trace + last activity
+        const footer = makeEl('div', 'font-size:0.75rem;color:#6272a4;border-top:1px solid #333;padding-top:0.5rem;');
+        [
+            { label: 'エラー率', value: `${agent.error_rate}%`, color: errorColor },
+            { label: 'AW最終トレース', value: awStr, color: agent.aw_last_trace_at ? '#f8f8f2' : '#555' },
+            { label: '最終活動', value: lastActStr, color: '#6272a4' },
+        ].forEach(({ label, value, color }) => {
+            const row = makeEl('div', 'display:flex;justify-content:space-between;margin-bottom:2px;');
+            row.appendChild(makeEl('span', null, label));
+            row.appendChild(makeEl('span', `color:${color};`, value));
+            footer.appendChild(row);
+        });
+        card.appendChild(footer);
+
         grid.appendChild(card);
     });
     container.appendChild(grid);

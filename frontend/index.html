@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hermes - Agent Orchestration</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>🤖 Hermes</h1>
+            <p>Agent Orchestration & Task Management</p>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="nav">
+            <button class="nav-btn active" data-tab="dashboard">📊 ダッシュボード</button>
+            <button class="nav-btn" data-tab="agents">🤖 エージェント</button>
+            <button class="nav-btn" data-tab="tasks">📋 タスク</button>
+        </nav>
+
+        <!-- Dashboard Tab -->
+        <div class="tab-content active" id="dashboard">
+            <div class="status-grid">
+                <div class="status-card">
+                    <div class="status-label">総エージェント数</div>
+                    <div class="status-value" id="total-agents">0</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-label">実行中エージェント</div>
+                    <div class="status-value" id="active-agents">0</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-label">総タスク数</div>
+                    <div class="status-value" id="total-tasks">0</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-label">待機中タスク</div>
+                    <div class="status-value" id="pending-tasks">0</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-label">実行中タスク</div>
+                    <div class="status-value" id="running-tasks">0</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-label">完了タスク</div>
+                    <div class="status-value" id="completed-tasks">0</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-label">失敗タスク</div>
+                    <div class="status-value" id="failed-tasks">0</div>
+                </div>
+            </div>
+
+            <div class="recent-section">
+                <h3>最近のタスク</h3>
+                <div id="recent-tasks" class="tasks-list">
+                    <p class="empty">タスクがありません</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Agents Tab -->
+        <div class="tab-content" id="agents">
+            <div class="section-header">
+                <h3>エージェント管理</h3>
+                <button class="btn btn-primary" id="create-agent-btn">+ 新規エージェント</button>
+            </div>
+
+            <!-- Create Agent Form -->
+            <div class="form-section" id="create-agent-form" style="display: none;">
+                <h4>エージェント登録</h4>
+                <form id="agent-form">
+                    <div class="form-group">
+                        <label>エージェント名</label>
+                        <input type="text" id="agent-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>説明</label>
+                        <textarea id="agent-description" required></textarea>
+                    </div>
+                    <div class="form-buttons">
+                        <button type="submit" class="btn btn-primary">登録</button>
+                        <button type="button" class="btn btn-secondary" id="cancel-agent-btn">キャンセル</button>
+                    </div>
+                </form>
+            </div>
+
+            <div id="agents-list" class="agents-list">
+                <p class="empty">エージェントがありません</p>
+            </div>
+        </div>
+
+        <!-- Tasks Tab -->
+        <div class="tab-content" id="tasks">
+            <div class="section-header">
+                <h3>タスク管理</h3>
+                <button class="btn btn-primary" id="create-task-btn">+ 新規タスク</button>
+            </div>
+
+            <!-- Create Task Form -->
+            <div class="form-section" id="create-task-form" style="display: none;">
+                <h4>タスク作成</h4>
+                <form id="task-form">
+                    <div class="form-group">
+                        <label>エージェント</label>
+                        <select id="task-agent" required>
+                            <option value="">選択してください</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>タイトル</label>
+                        <input type="text" id="task-title" required>
+                    </div>
+                    <div class="form-group">
+                        <label>説明</label>
+                        <textarea id="task-description" required></textarea>
+                    </div>
+                    <div class="form-buttons">
+                        <button type="submit" class="btn btn-primary">作成</button>
+                        <button type="button" class="btn btn-secondary" id="cancel-task-btn">キャンセル</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Task Filters -->
+            <div class="filters">
+                <label>ステータス:</label>
+                <select id="task-status-filter">
+                    <option value="">すべて</option>
+                    <option value="pending">待機中</option>
+                    <option value="running">実行中</option>
+                    <option value="completed">完了</option>
+                    <option value="failed">失敗</option>
+                </select>
+            </div>
+
+            <div id="tasks-list" class="tasks-list">
+                <p class="empty">タスクがありません</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Task Detail Modal -->
+    <div class="modal" id="task-modal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeModal('task-modal')">&times;</button>
+            <div id="task-detail-content"></div>
+        </div>
+    </div>
+
+    <!-- Agent Detail Modal -->
+    <div class="modal" id="agent-modal">
+        <div class="modal-content modal-large">
+            <button class="modal-close" onclick="closeModal('agent-modal')">&times;</button>
+            <div id="agent-detail-content"></div>
+        </div>
+    </div>
+
+    <script src="js/api.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

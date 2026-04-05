@@ -159,6 +159,7 @@ function setupEventListeners() {
 
     // Timeline tab
     document.getElementById('timeline-refresh-btn').addEventListener('click', () => loadTimeline());
+    document.getElementById('compare-refresh-btn').addEventListener('click', () => loadCompare());
     document.getElementById('timeline-agent-filter').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') loadTimeline();
     });
@@ -238,13 +239,17 @@ async function runTraceSearch(offset = 0) {
     traceSearchState.offset = offset;
 
     setEmptyMessage(container, '検索中...');
-    let traces;
+    let result;
     try {
-        traces = await API.searchTraces(query, traceSearchState.limit, offset);
+        result = await API.searchTraces(query, traceSearchState.limit, offset);
     } catch (_e) {
         setEmptyMessage(container, '検索に失敗しました。agent-whisper に接続できません。');
         return;
     }
+
+    // Support both paginated {items, total} and legacy plain array
+    const traces = Array.isArray(result) ? result : (result.items || []);
+    const total = result.total != null ? result.total : traces.length;
 
     container.textContent = '';
 
@@ -256,7 +261,7 @@ async function runTraceSearch(offset = 0) {
     const summary = document.createElement('p');
     summary.style.cssText = 'font-size:0.82rem;color:#718096;margin-bottom:0.5rem;';
     const pageNum = Math.floor(offset / traceSearchState.limit) + 1;
-    summary.textContent = `${traces.length} 件表示中（ページ ${pageNum}、検索: "${query}"）`;
+    summary.textContent = `${traces.length} 件表示中（ページ ${pageNum} / 合計 ${total} 件、検索: "${query}"）`;
     container.appendChild(summary);
 
     if (traces.length > 0) {
@@ -310,7 +315,7 @@ async function runTraceSearch(offset = 0) {
         prevBtn.addEventListener('click', () => runTraceSearch(offset - traceSearchState.limit));
         pagination.appendChild(prevBtn);
     }
-    if (traces.length === traceSearchState.limit) {
+    if (offset + traces.length < total) {
         const nextBtn = document.createElement('button');
         nextBtn.className = 'btn btn-secondary';
         nextBtn.textContent = '次へ →';
@@ -354,6 +359,8 @@ function switchTab(tabName) {
         loadTimeline();
     } else if (tabName === 'traces') {
         loadAwTraces();
+    } else if (tabName === 'compare') {
+        loadCompare();
     }
 }
 
@@ -1329,8 +1336,9 @@ async function loadTimeline() {
         if (agentFilter) awUrl += `&agent_id=${encodeURIComponent(agentFilter)}`;
         const res = await fetch(awUrl);
         if (res.ok) {
-            const traces = await res.json();
-            awItems = (Array.isArray(traces) ? traces : []).map(tr => ({
+            const data = await res.json();
+            const traces = Array.isArray(data) ? data : (data.items || []);
+            awItems = traces.map(tr => ({
                 type: 'trace',
                 timestamp: tr.started_at || tr.created_at || '',
                 title: tr.trace_id || '',

@@ -148,7 +148,9 @@ class API {
         try {
             const res = await fetch(`${AW_BASE_URL}/traces?agent_id=${encodeURIComponent(agentId)}&limit=${limit}`);
             if (!res.ok) return [];
-            return await res.json();
+            const data = await res.json();
+            // Support both paginated {items, total} and legacy plain array formats
+            return Array.isArray(data) ? data : (data.items || []);
         } catch (_e) {
             return [];
         }
@@ -158,7 +160,8 @@ class API {
         try {
             const res = await fetch(`${AW_BASE_URL}/traces?q=${encodeURIComponent(query)}&limit=${limit}`);
             if (!res.ok) return [];
-            return await res.json();
+            const data = await res.json();
+            return Array.isArray(data) ? data : (data.items || []);
         } catch (_e) {
             return [];
         }
@@ -168,14 +171,20 @@ class API {
         const url = `${AW_BASE_URL}/traces?q=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}`;
         const resp = await fetch(url);
         if (!resp.ok) throw new Error('agent-whisper search failed');
-        return await resp.json();
+        const data = await resp.json();
+        // Return paginated object or wrap legacy array
+        if (Array.isArray(data)) {
+            return { items: data, total: data.length, limit, offset };
+        }
+        return data;
     }
 
     static async getAllTraces(limit = 50) {
         const url = `${AW_BASE_URL}/traces?limit=${limit}`;
         const response = await fetch(url);
         if (!response.ok) return [];
-        return response.json();
+        const data = await response.json();
+        return Array.isArray(data) ? data : (data.items || []);
     }
 
     // Unified Timeline

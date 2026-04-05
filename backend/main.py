@@ -673,14 +673,25 @@ async def execute_task(task_id: str, background_tasks: BackgroundTasks):
 async def retry_task(task_id: str, background_tasks: BackgroundTasks):
     updated_at = datetime.utcnow().isoformat()
     with get_db() as conn:
-        result = conn.execute(
-            "UPDATE tasks SET status='pending', progress=0, error=NULL, updated_at=? WHERE id=?",
-            (updated_at, task_id)
+        row = conn.execute(
+            "SELECT id, max_retries, retry_count FROM tasks WHERE id = ?", (task_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Task not found")
+        max_retries = row[1] or 0
+        retry_count = row[2] or 0
+        if max_retries > 0 and retry_count >= max_retries:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Max retries reached ({retry_count}/{max_retries})"
+            )
+        new_retry_count = retry_count + 1
+        conn.execute(
+            "UPDATE tasks SET status='pending', progress=0, error=NULL, updated_at=?, retry_count=? WHERE id=?",
+            (updated_at, new_retry_count, task_id)
         )
-    if result.rowcount == 0:
-        raise HTTPException(status_code=404, detail="Task not found")
     background_tasks.add_task(_run_task_with_tools, task_id)
-    return {"status": "retried", "task_id": task_id}
+    return {"status": "retried", "task_id": task_id, "retry_count": new_retry_count}
 
 
 VALID_TASK_STATUSES = {"pending", "running", "completed", "failed", "cancelled"}
@@ -1005,6 +1016,38 @@ async def get_timeline(
     # Merge-sort by timestamp descending
     timeline.sort(key=lambda x: x["timestamp"] or "", reverse=True)
     return timeline[:limit]
+
+
+@app.get("/agents/compare")
+def get_agents_compare():
+    """エージェントごとのタスク統計を返す比較ビュー用エンドポイント"""
+    with get_db() as conn:
+        agents = [dict(r) for r in conn.execute("SELECT id, name, status FROM agents").fetchall()]
+        result = []
+        for agent in agents:
+            aid = agent["id"]
+            rows = conn.execute(
+                "SELECT status, progress FROM tasks WHERE agent_id = ?", (aid,)
+            ).fetchall()
+            total = len(rows)
+            completed = sum(1 for r in rows if r["status"] == "completed")
+            failed = sum(1 for r in rows if r["status"] == "failed")
+            running = sum(1 for r in rows if r["status"] == "running")
+            pending = sum(1 for r in rows if r["status"] == "pending")
+            completed_progresses = [r["progress"] for r in rows if r["status"] == "completed" and r["progress"] is not None]
+            avg_progress = (sum(completed_progresses) / len(completed_progresses)) if completed_progresses else 0.0
+            result.append({
+                "agent_id": aid,
+                "agent_name": agent["name"],
+                "status": agent["status"],
+                "total_tasks": total,
+                "completed_tasks": completed,
+                "failed_tasks": failed,
+                "running_tasks": running,
+                "pending_tasks": pending,
+                "avg_progress": round(avg_progress, 1),
+            })
+    return result
 
 
 @app.post("/test/discord-notify")

@@ -22,6 +22,7 @@
             <button class="nav-btn" data-tab="trace-search">🔍 トレース検索</button>
             <button class="nav-btn" data-tab="traces">🔍 AWトレース</button>
             <button class="nav-btn" data-tab="timeline">📅 タイムライン</button>
+            <button class="nav-btn" data-tab="compare">📊 比較</button>
         </nav>
 
         <!-- Dashboard Tab -->
@@ -195,6 +196,17 @@
             <div id="timeline-list" style="padding:0.5rem 0;">
                 <p class="empty">タイムラインを読み込み中...</p>
             </div>
+        </div>
+    </div>
+
+    <!-- Compare Tab -->
+    <div class="tab-content" id="compare">
+        <div class="section-header">
+            <h3>📊 エージェント比較ビュー</h3>
+            <button class="btn btn-secondary" id="compare-refresh-btn">更新</button>
+        </div>
+        <div id="compare-content">
+            <p class="empty">読み込み中...</p>
         </div>
     </div>
 

@@ -9,10 +9,12 @@ agent-whisper と連携してエージェントのトレース情報をリアル
 - 📋 **タスク管理** - タスク作成・追跡・進捗監視・優先度設定・期日管理
 - 📊 **ダッシュボード** - リアルタイムステータス表示（WebSocket）
 - 🔄 **自動リトライ** - 失敗タスクの自動再実行（max_retries 設定）
-- 🔗 **agent-whisper 連携** - エージェント詳細にトレース情報を統合表示
-- 🔔 **Discord 通知** - エージェントステータス変化・タスク完了時に Webhook 通知
-- 💾 **SQLite 永続化** - コンテナ再起動後もデータを保持
+- 🔗 **agent-whisper 連携** - エージェント詳細にトレース情報を統合表示・タイムライン統合ビュー
+- 🔔 **Discord 通知** - タスク作成時・ステータス変化時に Webhook 通知（バルへのタスク送信）
+- 💾 **SQLite 永続化** - コンテナ再起動後もデータを保持（`./data/hermes.db`）
 - 📝 **タスクログ** - リアルタイムの実行ログ閲覧
+- 📈 **メトリクスダッシュボード** - Chart.js でエージェントごとのタスク統計を可視化
+- 🤖 **バル連携** - Discord 経由でバル（OpenClaw）にタスクを送信・進捗報告を受け取る
 
 ## アーキテクチャ
 
@@ -99,12 +101,14 @@ ANTHROPIC_API_KEY=
 | メソッド | パス | 説明 |
 |---------|------|------|
 | `GET` | `/tasks` | タスク一覧（`?agent_id=xxx&status=pending`）|
-| `POST` | `/tasks` | タスク作成 |
+| `POST` | `/tasks` | タスク作成（Discord 通知付き）|
 | `GET` | `/tasks/{id}` | タスク詳細 |
 | `PUT` | `/tasks/{id}` | タスク更新 |
 | `PUT` | `/tasks/{id}/status` | ステータス変更 |
 | `PUT` | `/tasks/{id}/retry` | 再実行 |
 | `GET` | `/tasks/{id}/logs` | 実行ログ |
+| `POST` | `/tasks/{id}/progress` | 進捗・ステータス報告（エージェント側から） |
+| `POST` | `/tasks/{id}/logs` | ログ追加（エージェント側から） |
 
 ### agent-whisper プロキシ
 
@@ -192,6 +196,44 @@ cat .env
 # 再ビルド
 docker compose up -d --build
 ```
+
+## バルとの連携（Discord 経由タスク送信）
+
+Hermes からバル（OpenClaw エージェント）にタスクを送信し、結果を受け取るワークフロー。
+
+### フロー
+
+```
+1. Hermes UI でタスク作成（agent: bal-main）
+   ↓ Discord Webhook 通知
+2. バルが hermes-alerts チャンネルで受信
+   ↓ タスク内容を確認・実行
+3. バルが hermes-report.py で結果を報告
+   ↓ API 呼び出し
+4. Hermes ダッシュボードで完了を確認
+```
+
+### バル用スクリプト（`~/.openclaw/workspace/scripts/`）
+
+```bash
+# pending タスクを確認
+python3 scripts/hermes-task-poller.py --once
+
+# タスク完了を報告
+python3 scripts/hermes-report.py --task-id <id> --status completed --result "実行結果"
+
+# 進捗・ログを追加
+python3 scripts/hermes-report.py --task-id <id> --log "ステップ1完了" --progress 50
+```
+
+### Cron 設定（5分ごとにpendingタスクをチェック）
+
+OpenClaw の `CronCreate` で以下を設定済み：
+```
+*/5 * * * * python3 scripts/hermes-task-poller.py --once
+```
+
+---
 
 ## 作成者
 

@@ -107,6 +107,14 @@ class API {
         });
     }
 
+    static updateTaskStatus(id, status) {
+        return this.request(`/tasks/${id}/status`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status })
+        });
+    }
+
     static executeTask(id) {
         return this.request(`/tasks/${id}/execute`, {
             method: 'POST'

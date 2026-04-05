@@ -482,7 +482,7 @@ async function showAgentDetail(agentId) {
             const thead = document.createElement('thead');
             const headerRow = document.createElement('tr');
             headerRow.style.cssText = 'background:#edf2f7;text-align:left;';
-            ['タイトル', 'ステータス', '進捗', '更新日時'].forEach(label => {
+            ['タイトル', 'ステータス', '進捗', '更新日時', '操作'].forEach(label => {
                 const th = document.createElement('th');
                 th.style.padding = '6px 8px';
                 th.textContent = label;
@@ -493,17 +493,20 @@ async function showAgentDetail(agentId) {
             const tbody = document.createElement('tbody');
             agentTasks.forEach((t, i) => {
                 const tr = document.createElement('tr');
-                tr.style.cssText = (i % 2 === 0 ? 'background:#fff;' : 'background:#f7fafc;') + 'cursor:pointer;';
-                tr.addEventListener('click', () => { closeModal('agent-modal'); showTaskDetail(t.id); });
+                tr.id = 'task-row-' + t.id;
+                tr.style.cssText = (i % 2 === 0 ? 'background:#fff;' : 'background:#f7fafc;');
 
                 const tdTitle = document.createElement('td');
-                tdTitle.style.padding = '5px 8px';
+                tdTitle.style.cssText = 'padding:5px 8px;cursor:pointer;';
                 tdTitle.textContent = t.title;
+                tdTitle.addEventListener('click', () => { closeModal('agent-modal'); showTaskDetail(t.id); });
                 tr.appendChild(tdTitle);
 
                 const tdStatus = document.createElement('td');
                 tdStatus.style.padding = '5px 8px';
+                tdStatus.id = 'task-status-cell-' + t.id;
                 const span = document.createElement('span');
+                span.id = 'task-status-badge-' + t.id;
                 span.className = 'card-status status-' + t.status;
                 span.textContent = t.status;
                 tdStatus.appendChild(span);
@@ -511,13 +514,58 @@ async function showAgentDetail(agentId) {
 
                 const tdProgress = document.createElement('td');
                 tdProgress.style.padding = '5px 8px';
+                tdProgress.id = 'task-progress-cell-' + t.id;
                 tdProgress.textContent = t.progress + '%';
                 tr.appendChild(tdProgress);
 
                 const tdUpdated = document.createElement('td');
                 tdUpdated.style.cssText = 'padding:5px 8px;font-size:0.8rem;';
+                tdUpdated.id = 'task-updated-cell-' + t.id;
                 tdUpdated.textContent = t.updated_at ? new Date(t.updated_at).toLocaleString('ja-JP') : '-';
                 tr.appendChild(tdUpdated);
+
+                // Status change buttons
+                const tdActions = document.createElement('td');
+                tdActions.style.cssText = 'padding:3px 8px;white-space:nowrap;';
+                const statusButtons = [
+                    { label: '▶', status: 'running', color: '#3182ce', title: 'running に変更' },
+                    { label: '✓', status: 'completed', color: '#38a169', title: 'completed に変更' },
+                    { label: '✗', status: 'failed', color: '#e53e3e', title: 'failed に変更' },
+                ];
+                statusButtons.forEach(({ label, status, color, title }) => {
+                    const btn = document.createElement('button');
+                    btn.textContent = label;
+                    btn.title = title;
+                    btn.style.cssText = `margin:2px;padding:2px 7px;font-size:0.8rem;border:1px solid ${color};color:${color};background:white;border-radius:4px;cursor:pointer;`;
+                    btn.addEventListener('mouseover', () => { btn.style.background = color; btn.style.color = 'white'; });
+                    btn.addEventListener('mouseout', () => { btn.style.background = 'white'; btn.style.color = color; });
+                    btn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        btn.disabled = true;
+                        try {
+                            const result = await API.updateTaskStatus(t.id, status);
+                            // Update badge and progress in-place
+                            const badge = document.getElementById('task-status-badge-' + t.id);
+                            if (badge) {
+                                badge.className = 'card-status status-' + status;
+                                badge.textContent = status;
+                            }
+                            const progressCell = document.getElementById('task-progress-cell-' + t.id);
+                            if (progressCell) {
+                                const progressMap = { running: 50, completed: 100 };
+                                if (progressMap[status] !== undefined) progressCell.textContent = progressMap[status] + '%';
+                            }
+                            const updatedCell = document.getElementById('task-updated-cell-' + t.id);
+                            if (updatedCell) updatedCell.textContent = new Date(result.updated_at).toLocaleString('ja-JP');
+                        } catch (err) {
+                            alert('ステータス更新に失敗しました: ' + err.message);
+                        } finally {
+                            btn.disabled = false;
+                        }
+                    });
+                    tdActions.appendChild(btn);
+                });
+                tr.appendChild(tdActions);
 
                 tbody.appendChild(tr);
             });

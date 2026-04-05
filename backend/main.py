@@ -1,15 +1,15 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime
 from typing import List, Optional
 import uuid
-import json
+import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 app = FastAPI(title="Hermes Agent Orchestration")
 
-# CORS設定
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,11 +18,94 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# データ保存用（実運用はDBを使用）
-DATA_DIR = Path("data")
-DATA_DIR.mkdir(exist_ok=True)
+DB_PATH = Path("data/hermes.db")
+DB_PATH.parent.mkdir(exist_ok=True)
 
-# モデル定義
+
+def init_db():
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS agents (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                status TEXT DEFAULT 'idle',
+                parameters TEXT,
+                created_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS tasks (
+                id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT,
+                status TEXT DEFAULT 'pending',
+                progress INTEGER DEFAULT 0,
+                result TEXT,
+                error TEXT,
+                created_at TEXT,
+                updated_at TEXT,
+                FOREIGN KEY (agent_id) REFERENCES agents(id)
+            );
+            CREATE TABLE IF NOT EXISTS agent_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                level TEXT DEFAULT 'info',
+                message TEXT,
+                FOREIGN KEY (agent_id) REFERENCES agents(id)
+            );
+            CREATE TABLE IF NOT EXISTS agent_memory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT,
+                UNIQUE(agent_id, key),
+                FOREIGN KEY (agent_id) REFERENCES agents(id)
+            );
+        """)
+
+
+init_db()
+
+
+@contextmanager
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+import json
+
+
+def row_to_agent(row) -> dict:
+    d = dict(row)
+    if d.get("parameters"):
+        try:
+            d["parameters"] = json.loads(d["parameters"])
+        except Exception:
+            d["parameters"] = None
+    return d
+
+
+def row_to_task(row) -> dict:
+    d = dict(row)
+    if d.get("result"):
+        try:
+            d["result"] = json.loads(d["result"])
+        except Exception:
+            d["result"] = None
+    return d
+
+
+# Models
 class Agent(BaseModel):
     id: Optional[str] = None
     name: str
@@ -31,14 +114,17 @@ class Agent(BaseModel):
     parameters: Optional[dict] = None
     created_at: Optional[str] = None
 
+
 class AgentLog(BaseModel):
     timestamp: str
     level: str = "info"
     message: str
 
+
 class AgentMemory(BaseModel):
     key: str
     value: str
+
 
 class Task(BaseModel):
     id: Optional[str] = None
@@ -52,6 +138,7 @@ class Task(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
+
 class SystemStatus(BaseModel):
     total_agents: int
     active_agents: int
@@ -61,237 +148,182 @@ class SystemStatus(BaseModel):
     completed_tasks: int
     failed_tasks: int
 
-# ヘルスチェック
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
 
-# Agent API
+
 @app.get("/agents", response_model=List[Agent])
 async def list_agents():
-    agents_file = DATA_DIR / "agents.json"
-    if not agents_file.exists():
-        return []
-    with open(agents_file) as f:
-        return json.load(f)
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM agents ORDER BY created_at DESC").fetchall()
+    return [row_to_agent(r) for r in rows]
+
 
 @app.post("/agents", response_model=Agent)
 async def create_agent(agent: Agent):
     agent.id = str(uuid.uuid4())
     agent.created_at = datetime.utcnow().isoformat()
-    
-    agents_file = DATA_DIR / "agents.json"
-    agents = []
-    if agents_file.exists():
-        with open(agents_file) as f:
-            agents = json.load(f)
-    
-    agents.append(agent.dict())
-    with open(agents_file, "w") as f:
-        json.dump(agents, f, indent=2)
-    
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO agents (id, name, description, status, parameters, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (agent.id, agent.name, agent.description, agent.status,
+             json.dumps(agent.parameters) if agent.parameters else None,
+             agent.created_at)
+        )
     return agent
+
 
 @app.get("/agents/{agent_id}", response_model=Agent)
 async def get_agent(agent_id: str):
-    agents_file = DATA_DIR / "agents.json"
-    if not agents_file.exists():
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM agents WHERE id = ?", (agent_id,)).fetchone()
+    if not row:
         raise HTTPException(status_code=404, detail="Agent not found")
-    
-    with open(agents_file) as f:
-        agents = json.load(f)
-    
-    agent = next((a for a in agents if a["id"] == agent_id), None)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    
-    return agent
+    return row_to_agent(row)
 
-# Task API
+
+@app.put("/agents/{agent_id}/parameters")
+async def update_agent_parameters(agent_id: str, parameters: dict):
+    with get_db() as conn:
+        result = conn.execute(
+            "UPDATE agents SET parameters = ? WHERE id = ?",
+            (json.dumps(parameters), agent_id)
+        )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return {"status": "updated"}
+
+
+@app.get("/agents/{agent_id}/logs")
+async def get_agent_logs(agent_id: str):
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT timestamp, level, message FROM agent_logs WHERE agent_id = ? ORDER BY id DESC LIMIT 200",
+            (agent_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+@app.post("/agents/{agent_id}/logs")
+async def add_agent_log(agent_id: str, log: AgentLog):
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO agent_logs (agent_id, timestamp, level, message) VALUES (?, ?, ?, ?)",
+            (agent_id, log.timestamp, log.level, log.message)
+        )
+    return log
+
+
+@app.get("/agents/{agent_id}/memory")
+async def get_agent_memory(agent_id: str):
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT key, value FROM agent_memory WHERE agent_id = ?",
+            (agent_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+@app.put("/agents/{agent_id}/memory")
+async def update_agent_memory(agent_id: str, memory: AgentMemory):
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO agent_memory (agent_id, key, value) VALUES (?, ?, ?) ON CONFLICT(agent_id, key) DO UPDATE SET value = excluded.value",
+            (agent_id, memory.key, memory.value)
+        )
+    return memory
+
+
 @app.get("/tasks", response_model=List[Task])
 async def list_tasks(agent_id: Optional[str] = Query(None), status: Optional[str] = Query(None)):
-    tasks_file = DATA_DIR / "tasks.json"
-    if not tasks_file.exists():
-        return []
-    
-    with open(tasks_file) as f:
-        tasks = json.load(f)
-    
+    query = "SELECT * FROM tasks WHERE 1=1"
+    params = []
     if agent_id:
-        tasks = [t for t in tasks if t["agent_id"] == agent_id]
+        query += " AND agent_id = ?"
+        params.append(agent_id)
     if status:
-        tasks = [t for t in tasks if t["status"] == status]
-    
-    return tasks
+        query += " AND status = ?"
+        params.append(status)
+    query += " ORDER BY created_at DESC"
+    with get_db() as conn:
+        rows = conn.execute(query, params).fetchall()
+    return [row_to_task(r) for r in rows]
+
 
 @app.post("/tasks", response_model=Task)
 async def create_task(task: Task):
     task.id = str(uuid.uuid4())
     task.created_at = datetime.utcnow().isoformat()
-    task.updated_at = datetime.utcnow().isoformat()
-    
-    tasks_file = DATA_DIR / "tasks.json"
-    tasks = []
-    if tasks_file.exists():
-        with open(tasks_file) as f:
-            tasks = json.load(f)
-    
-    tasks.append(task.dict())
-    with open(tasks_file, "w") as f:
-        json.dump(tasks, f, indent=2)
-    
+    task.updated_at = task.created_at
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO tasks (id, agent_id, title, description, status, progress, result, error, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (task.id, task.agent_id, task.title, task.description, task.status,
+             task.progress, json.dumps(task.result) if task.result else None,
+             task.error, task.created_at, task.updated_at)
+        )
     return task
+
 
 @app.get("/tasks/{task_id}", response_model=Task)
 async def get_task(task_id: str):
-    tasks_file = DATA_DIR / "tasks.json"
-    if not tasks_file.exists():
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    if not row:
         raise HTTPException(status_code=404, detail="Task not found")
-    
-    with open(tasks_file) as f:
-        tasks = json.load(f)
-    
-    task = next((t for t in tasks if t["id"] == task_id), None)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    
-    return task
+    return row_to_task(row)
+
 
 @app.put("/tasks/{task_id}", response_model=Task)
 async def update_task(task_id: str, task: Task):
-    tasks_file = DATA_DIR / "tasks.json"
-    if not tasks_file.exists():
-        raise HTTPException(status_code=404, detail="Task not found")
-    
-    with open(tasks_file) as f:
-        tasks = json.load(f)
-    
-    task_index = next((i for i, t in enumerate(tasks) if t["id"] == task_id), None)
-    if task_index is None:
-        raise HTTPException(status_code=404, detail="Task not found")
-    
     task.updated_at = datetime.utcnow().isoformat()
-    tasks[task_index] = task.dict()
-    
-    with open(tasks_file, "w") as f:
-        json.dump(tasks, f, indent=2)
-    
+    with get_db() as conn:
+        result = conn.execute(
+            "UPDATE tasks SET agent_id=?, title=?, description=?, status=?, progress=?, result=?, error=?, updated_at=? WHERE id=?",
+            (task.agent_id, task.title, task.description, task.status,
+             task.progress, json.dumps(task.result) if task.result else None,
+             task.error, task.updated_at, task_id)
+        )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Task not found")
     return task
 
-@app.get("/agents/{agent_id}/logs")
-async def get_agent_logs(agent_id: str):
-    logs_file = DATA_DIR / f"agent_{agent_id}_logs.json"
-    if not logs_file.exists():
-        return []
-    with open(logs_file) as f:
-        return json.load(f)
-
-@app.post("/agents/{agent_id}/logs")
-async def add_agent_log(agent_id: str, log: AgentLog):
-    logs_file = DATA_DIR / f"agent_{agent_id}_logs.json"
-    logs = []
-    if logs_file.exists():
-        with open(logs_file) as f:
-            logs = json.load(f)
-    logs.append(log.dict())
-    with open(logs_file, "w") as f:
-        json.dump(logs, f, indent=2)
-    return log
-
-@app.get("/agents/{agent_id}/memory")
-async def get_agent_memory(agent_id: str):
-    memory_file = DATA_DIR / f"agent_{agent_id}_memory.json"
-    if not memory_file.exists():
-        return []
-    with open(memory_file) as f:
-        return json.load(f)
-
-@app.put("/agents/{agent_id}/memory")
-async def update_agent_memory(agent_id: str, memory: AgentMemory):
-    memory_file = DATA_DIR / f"agent_{agent_id}_memory.json"
-    items = []
-    if memory_file.exists():
-        with open(memory_file) as f:
-            items = json.load(f)
-    existing = next((i for i, m in enumerate(items) if m["key"] == memory.key), None)
-    if existing is not None:
-        items[existing] = memory.dict()
-    else:
-        items.append(memory.dict())
-    with open(memory_file, "w") as f:
-        json.dump(items, f, indent=2)
-    return memory
-
-@app.put("/agents/{agent_id}/parameters")
-async def update_agent_parameters(agent_id: str, parameters: dict):
-    agents_file = DATA_DIR / "agents.json"
-    if not agents_file.exists():
-        raise HTTPException(status_code=404, detail="Agent not found")
-    with open(agents_file) as f:
-        agents = json.load(f)
-    idx = next((i for i, a in enumerate(agents) if a["id"] == agent_id), None)
-    if idx is None:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    agents[idx]["parameters"] = parameters
-    with open(agents_file, "w") as f:
-        json.dump(agents, f, indent=2)
-    return {"status": "updated"}
 
 @app.put("/tasks/{task_id}/retry")
 async def retry_task(task_id: str):
-    tasks_file = DATA_DIR / "tasks.json"
-    if not tasks_file.exists():
+    updated_at = datetime.utcnow().isoformat()
+    with get_db() as conn:
+        result = conn.execute(
+            "UPDATE tasks SET status='pending', progress=0, error=NULL, updated_at=? WHERE id=?",
+            (updated_at, task_id)
+        )
+    if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Task not found")
-    
-    with open(tasks_file) as f:
-        tasks = json.load(f)
-    
-    task_index = next((i for i, t in enumerate(tasks) if t["id"] == task_id), None)
-    if task_index is None:
-        raise HTTPException(status_code=404, detail="Task not found")
-    
-    tasks[task_index]["status"] = "pending"
-    tasks[task_index]["progress"] = 0
-    tasks[task_index]["error"] = None
-    tasks[task_index]["updated_at"] = datetime.utcnow().isoformat()
-    
-    with open(tasks_file, "w") as f:
-        json.dump(tasks, f, indent=2)
-    
     return {"status": "retried"}
 
-# Status API
+
 @app.get("/status", response_model=SystemStatus)
 async def get_status():
-    agents_file = DATA_DIR / "agents.json"
-    tasks_file = DATA_DIR / "tasks.json"
-    
-    agents = []
-    tasks = []
-    
-    if agents_file.exists():
-        with open(agents_file) as f:
-            agents = json.load(f)
-    
-    if tasks_file.exists():
-        with open(tasks_file) as f:
-            tasks = json.load(f)
-    
-    active_agents = sum(1 for a in agents if a.get("status") == "running")
-    pending_tasks = sum(1 for t in tasks if t.get("status") == "pending")
-    running_tasks = sum(1 for t in tasks if t.get("status") == "running")
-    completed_tasks = sum(1 for t in tasks if t.get("status") == "completed")
-    failed_tasks = sum(1 for t in tasks if t.get("status") == "failed")
-    
+    with get_db() as conn:
+        total_agents = conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
+        active_agents = conn.execute("SELECT COUNT(*) FROM agents WHERE status='running'").fetchone()[0]
+        total_tasks = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+        pending_tasks = conn.execute("SELECT COUNT(*) FROM tasks WHERE status='pending'").fetchone()[0]
+        running_tasks = conn.execute("SELECT COUNT(*) FROM tasks WHERE status='running'").fetchone()[0]
+        completed_tasks = conn.execute("SELECT COUNT(*) FROM tasks WHERE status='completed'").fetchone()[0]
+        failed_tasks = conn.execute("SELECT COUNT(*) FROM tasks WHERE status='failed'").fetchone()[0]
     return SystemStatus(
-        total_agents=len(agents),
+        total_agents=total_agents,
         active_agents=active_agents,
-        total_tasks=len(tasks),
+        total_tasks=total_tasks,
         pending_tasks=pending_tasks,
         running_tasks=running_tasks,
         completed_tasks=completed_tasks,
         failed_tasks=failed_tasks
     )
+
 
 if __name__ == "__main__":
     import uvicorn

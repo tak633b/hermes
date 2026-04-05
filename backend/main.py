@@ -921,6 +921,20 @@ async def get_status():
     )
 
 
+@app.post("/test/discord-notify")
+async def test_discord_notify():
+    """Test Discord webhook notification."""
+    if not DISCORD_WEBHOOK_URL:
+        return {"status": "skipped", "reason": "DISCORD_WEBHOOK_URL not configured"}
+    await send_discord_notification(
+        title="🧪 Hermes テスト通知",
+        description="Discord Webhook が正常に動作しています！",
+        color=5763719,
+        fields=[{"name": "送信元", "value": "Hermes API /test/discord-notify", "inline": True}]
+    )
+    return {"status": "sent", "webhook_url": DISCORD_WEBHOOK_URL[:50] + "..."}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

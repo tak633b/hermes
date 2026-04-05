@@ -1,8 +1,9 @@
-from fastapi import Body, FastAPI, HTTPException, Query, BackgroundTasks
+from fastapi import Body, FastAPI, HTTPException, Query, BackgroundTasks, WebSocket, WebSocketDisconnect
+import aiohttp
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Set
 import uuid
 import sqlite3
 from contextlib import contextmanager
@@ -12,6 +13,31 @@ import asyncio
 import time
 
 app = FastAPI(title="Hermes Agent Orchestration")
+
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active: Set[WebSocket] = set()
+
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        self.active.add(ws)
+
+    def disconnect(self, ws: WebSocket):
+        self.active.discard(ws)
+
+    async def broadcast(self, message: dict):
+        data = json.dumps(message)
+        dead = set()
+        for ws in list(self.active):
+            try:
+                await ws.send_text(data)
+            except Exception:
+                dead.add(ws)
+        for ws in dead:
+            self.active.discard(ws)
+
+ws_manager = ConnectionManager()
 
 app.add_middleware(
     CORSMiddleware,
@@ -586,7 +612,59 @@ async def update_task_status(task_id: str, body: dict = Body(...)):
                 (new_status, updated_at, task_id)
             )
 
+    await ws_manager.broadcast({
+        "event": "task_status_changed",
+        "task_id": task_id,
+        "status": new_status,
+        "updated_at": updated_at,
+    })
     return {"task_id": task_id, "status": new_status, "updated_at": updated_at}
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(ws: WebSocket):
+    """WebSocket endpoint for real-time agent/task status updates."""
+    await ws_manager.connect(ws)
+    try:
+        # Send initial state
+        with get_db() as conn:
+            agents = conn.execute("SELECT id, name, status FROM agents").fetchall()
+        await ws.send_text(json.dumps({
+            "event": "init",
+            "agents": [{"id": r[0], "name": r[1], "status": r[2]} for r in agents],
+        }))
+        # Keep alive until client disconnects
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(ws)
+
+
+@app.get("/agent-whisper/traces")
+async def get_agent_whisper_traces(agent_id: Optional[str] = Query(None)):
+    """
+    Proxy endpoint to fetch traces from agent-whisper.
+    Forwards requests to agent-whisper backend.
+    """
+    import aiohttp
+    import asyncio
+    
+    try:
+        agent_whisper_url = "http://agent-whisper:8000"  # Docker internal name
+        endpoint = "/api/traces"
+        params = {}
+        if agent_id:
+            params["agent_id"] = agent_id
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{agent_whisper_url}{endpoint}", params=params, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return {"traces": data}
+                else:
+                    raise HTTPException(status_code=resp.status, detail="agent-whisper request failed")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching traces: {str(e)}")
 
 
 @app.get("/status", response_model=SystemStatus)

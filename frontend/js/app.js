@@ -2,6 +2,89 @@
 let agentLogInterval = null;
 let currentAgentId = null;
 
+// WebSocket connection
+let ws = null;
+let wsReconnectTimer = null;
+
+function connectWebSocket() {
+    // Connect via nginx /ws proxy (same origin as frontend port)
+    const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProto}//${location.host}/ws`;
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+        console.log('[WS] Connected');
+        if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+        showWsBadge('connected');
+    };
+
+    ws.onmessage = (event) => {
+        try {
+            const msg = JSON.parse(event.data);
+            handleWsMessage(msg);
+        } catch (_e) {}
+    };
+
+    ws.onclose = () => {
+        console.log('[WS] Disconnected, reconnecting in 3s...');
+        showWsBadge('disconnected');
+        wsReconnectTimer = setTimeout(connectWebSocket, 3000);
+    };
+
+    ws.onerror = () => { ws.close(); };
+}
+
+function handleWsMessage(msg) {
+    if (msg.event === 'task_status_changed') {
+        // Update status badge in any visible task table
+        const badge = document.getElementById('task-status-badge-' + msg.task_id);
+        if (badge) {
+            badge.className = 'card-status status-' + msg.status;
+            badge.textContent = msg.status;
+        }
+        const progressCell = document.getElementById('task-progress-cell-' + msg.task_id);
+        if (progressCell) {
+            const progressMap = { running: 50, completed: 100 };
+            if (progressMap[msg.status] !== undefined) progressCell.textContent = progressMap[msg.status] + '%';
+        }
+        const updatedCell = document.getElementById('task-updated-cell-' + msg.task_id);
+        if (updatedCell && msg.updated_at) updatedCell.textContent = new Date(msg.updated_at).toLocaleString('ja-JP');
+
+        // Show toast
+        showToast(`タスク ${msg.task_id.slice(0, 8)}... → ${msg.status}`);
+    } else if (msg.event === 'init') {
+        console.log('[WS] Received initial state:', msg.agents?.length, 'agents');
+    }
+}
+
+function showWsBadge(state) {
+    let badge = document.getElementById('ws-badge');
+    if (!badge) {
+        badge = document.createElement('span');
+        badge.id = 'ws-badge';
+        badge.style.cssText = 'position:fixed;bottom:16px;right:16px;padding:4px 10px;border-radius:12px;font-size:0.75rem;z-index:9999;';
+        document.body.appendChild(badge);
+    }
+    if (state === 'connected') {
+        badge.textContent = '● WS接続中';
+        badge.style.background = '#c6f6d5';
+        badge.style.color = '#276749';
+    } else {
+        badge.textContent = '○ WS切断';
+        badge.style.background = '#fed7d7';
+        badge.style.color = '#9b2c2c';
+    }
+}
+
+function showToast(message) {
+    const toast = document.createElement('div');
+    toast.textContent = message;
+    toast.style.cssText = 'position:fixed;bottom:48px;right:16px;background:#2d3748;color:#fff;padding:8px 14px;border-radius:8px;font-size:0.82rem;z-index:9999;opacity:0;transition:opacity 0.3s;';
+    document.body.appendChild(toast);
+    setTimeout(() => { toast.style.opacity = '1'; }, 50);
+    setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 400); }, 3000);
+}
+
 async function refreshAgentLogs(agentId, logPre) {
     try {
         const logs = await API.getAgentLogs(agentId);
@@ -19,6 +102,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeApp();
     loadDashboard();
     setupEventListeners();
+    connectWebSocket();
 
     // 5秒ごとにステータスを更新
     setInterval(updateDashboard, 5000);
@@ -623,9 +707,9 @@ async function showAgentDetail(agentId) {
 
         // Fetch agent-whisper traces asynchronously after modal is shown
         try {
-            const awResp = await fetch('http://localhost:9001/api/traces?q=' + encodeURIComponent(agent.name));
-            if (awResp.ok) {
-                const awTraces = await awResp.json();
+            const awResp = await API.getAgentWhisperTraces(agent.id);
+            if (awResp && awResp.traces) {
+                const awTraces = awResp.traces;
                 awSection.removeChild(awLoading);
                 if (awTraces.length === 0) {
                     const p = document.createElement('p');
@@ -679,7 +763,7 @@ async function showAgentDetail(agentId) {
                 awLoading.textContent = 'agent-whisper に接続できません';
             }
         } catch (_err) {
-            awLoading.textContent = 'agent-whisper に接続できません（http://localhost:9001 が起動しているか確認）';
+            awLoading.textContent = 'agent-whisper に接続できません（エラー: ' + (_err?.message || 'Unknown') + '）';
         }
     } catch (error) {
         alert('エージェント情報の取得に失敗しました: ' + error.message);

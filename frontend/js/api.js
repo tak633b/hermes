@@ -1,4 +1,5 @@
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = 'http://localhost:8010';
+const AW_BASE_URL = 'http://localhost:8000';
 
 class API {
     static async request(endpoint, options = {}) {
@@ -132,5 +133,10 @@ class API {
 
     static getHealth() {
         return this.request('/health');
+    }
+
+    // Agent Whisper Traces
+    static getAgentWhisperTraces(agentId) {
+        return this.request(`/agent-whisper/traces?agent_id=${agentId}`);
     }
 }

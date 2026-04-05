@@ -1571,16 +1571,42 @@ async function showTaskDetail(taskId) {
         });
         content.appendChild(infoDiv);
 
+        // Status action buttons
+        const actionDiv = document.createElement('div');
+        actionDiv.style.cssText = 'margin-top:1rem;display:flex;gap:0.5rem;flex-wrap:wrap;';
+
         if (task.status === 'pending') {
-            const execDiv = document.createElement('div');
-            execDiv.style.marginTop = '1rem';
             const execBtn = document.createElement('button');
-            execBtn.className = 'btn btn-success';
+            execBtn.className = 'btn btn-success btn-small';
             execBtn.textContent = '▶ 実行エンジン起動';
             execBtn.addEventListener('click', () => { closeModal('task-modal'); executeTask(task.id); });
-            execDiv.appendChild(execBtn);
-            content.appendChild(execDiv);
+            actionDiv.appendChild(execBtn);
         }
+
+        const statusActions = {
+            running: { label: '🔄 実行中にする', color: 'btn-primary' },
+            completed: { label: '✅ 完了にする', color: 'btn-success' },
+            failed: { label: '❌ 失敗にする', color: 'btn-warning' },
+            cancelled: { label: '🚫 キャンセル', color: 'btn-secondary' },
+        };
+        Object.entries(statusActions).forEach(([status, { label, color }]) => {
+            if (task.status === status) return; // 現在のステータスはスキップ
+            const btn = document.createElement('button');
+            btn.className = `btn ${color} btn-small`;
+            btn.textContent = label;
+            btn.addEventListener('click', async () => {
+                try {
+                    await API.updateTaskStatus(task.id, status);
+                    closeModal('task-modal');
+                    loadTasks();
+                    showToast(`ステータスを「${status}」に変更しました`);
+                } catch (e) {
+                    showToast('エラー: ' + e.message);
+                }
+            });
+            actionDiv.appendChild(btn);
+        });
+        content.appendChild(actionDiv);
 
         if (task.result) {
             const steps = task.result.steps || [];

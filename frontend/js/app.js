@@ -519,12 +519,12 @@ async function loadAgents() {
 
 function displayAgents(agents) {
     const container = document.getElementById('agents-list');
-    
+
     if (agents.length === 0) {
         container.innerHTML = '<p class="empty">エージェントがありません</p>';
         return;
     }
-    
+
     container.innerHTML = '';
     agents.forEach(agent => {
         const card = document.createElement('div');
@@ -539,12 +539,13 @@ function displayAgents(agents) {
         title.className = 'card-title';
         title.textContent = agent.name;
 
-        const status = document.createElement('span');
-        status.className = `card-status status-${agent.status}`;
-        status.textContent = agent.status;
+        const statusBadge = document.createElement('span');
+        statusBadge.id = 'agent-status-badge-' + agent.id;
+        statusBadge.className = `card-status status-${agent.status}`;
+        statusBadge.textContent = agent.status;
 
         header.appendChild(title);
-        header.appendChild(status);
+        header.appendChild(statusBadge);
 
         const desc = document.createElement('p');
         desc.className = 'card-description';
@@ -559,11 +560,34 @@ function displayAgents(agents) {
         hint.textContent = 'クリックで詳細';
         meta.appendChild(hint);
 
+        // Last activity row (populated async from agent-whisper)
+        const activityRow = document.createElement('div');
+        activityRow.style.cssText = 'font-size:0.78rem;color:#718096;margin-top:4px;';
+        activityRow.textContent = '最終アクティビティ: 読み込み中...';
+
         card.appendChild(header);
         card.appendChild(desc);
         card.appendChild(meta);
+        card.appendChild(activityRow);
         card.addEventListener('click', () => showAgentDetail(agent.id));
         container.appendChild(card);
+
+        // Fetch last activity from agent-whisper asynchronously
+        API.getAgentWhisperTraces(agent.name, 1).then(traces => {
+            if (traces && traces.length > 0) {
+                const t = traces[0];
+                const ts = t.ended_at || t.started_at;
+                if (ts) {
+                    activityRow.textContent = '最終アクティビティ: ' + new Date(ts).toLocaleString('ja-JP');
+                } else {
+                    activityRow.textContent = '最終アクティビティ: 不明';
+                }
+            } else {
+                activityRow.textContent = '最終アクティビティ: なし';
+            }
+        }).catch(() => {
+            activityRow.textContent = '最終アクティビティ: 取得失敗';
+        });
     });
 }
 
@@ -844,6 +868,119 @@ async function showAgentDetail(agentId) {
         toolCallSection.appendChild(quickAddDiv);
         content.appendChild(toolCallSection);
 
+        // Timeline section: unified view of tasks + traces (placed before task list)
+        const tlSection = document.createElement('div');
+        tlSection.style.marginTop = '1.5rem';
+        const tlTitle = document.createElement('h4');
+        tlTitle.textContent = '📅 タイムライン（タスク + トレース）';
+        tlSection.appendChild(tlTitle);
+
+        const traceListForTL = Array.isArray(awTraces) ? awTraces : (awTraces && awTraces.traces ? awTraces.traces : []);
+        const taskListForTL = Array.isArray(agentTasks) ? agentTasks : [];
+
+        // Format timestamp to YYYY-MM-DD HH:MM (JST)
+        function formatJSTTimestamp(isoStr) {
+            if (!isoStr) return '-';
+            const d = new Date(isoStr);
+            if (isNaN(d.getTime())) return '-';
+            const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+            const y = jst.getUTCFullYear();
+            const mo = String(jst.getUTCMonth() + 1).padStart(2, '0');
+            const da = String(jst.getUTCDate()).padStart(2, '0');
+            const h = String(jst.getUTCHours()).padStart(2, '0');
+            const mi = String(jst.getUTCMinutes()).padStart(2, '0');
+            return y + '-' + mo + '-' + da + ' ' + h + ':' + mi;
+        }
+
+        // Build unified event list
+        const tlEvents = [];
+        taskListForTL.forEach(t => {
+            tlEvents.push({
+                type: 'task',
+                icon: '📋',
+                time: new Date(t.created_at || 0).getTime(),
+                title: t.title || 'タスク',
+                sub: null,
+                status: t.status || 'pending',
+                ts: formatJSTTimestamp(t.created_at),
+            });
+        });
+        traceListForTL.slice(0, 20).forEach(tr => {
+            const sessionId = (tr.trace_id || tr.id || '').substring(0, 12);
+            const toolCount = tr.tool_call_count || 0;
+            tlEvents.push({
+                type: 'trace',
+                icon: '🔍',
+                time: new Date(tr.started_at || 0).getTime(),
+                title: sessionId ? 'session: ' + sessionId : 'トレース',
+                sub: 'ツール数: ' + toolCount + '件',
+                status: tr.status || null,
+                ts: formatJSTTimestamp(tr.started_at),
+            });
+        });
+        tlEvents.sort((a, b) => b.time - a.time);
+
+        if (tlEvents.length === 0) {
+            const emptyP = document.createElement('p');
+            emptyP.className = 'empty';
+            emptyP.textContent = 'タイムラインデータがありません';
+            tlSection.appendChild(emptyP);
+        } else {
+            const tlList = document.createElement('div');
+            tlList.className = 'timeline-list';
+            tlEvents.forEach(ev => {
+                const item = document.createElement('div');
+                item.className = 'timeline-item timeline-item-' + ev.type;
+
+                const iconSpan = document.createElement('span');
+                iconSpan.className = 'timeline-icon';
+                iconSpan.textContent = ev.icon;
+
+                const bodyDiv = document.createElement('div');
+                bodyDiv.className = 'timeline-body';
+
+                const topRow = document.createElement('div');
+                topRow.className = 'timeline-top-row';
+
+                const tsSpan = document.createElement('span');
+                tsSpan.className = 'timeline-ts';
+                tsSpan.textContent = ev.ts;
+
+                const titleSpan = document.createElement('span');
+                titleSpan.className = 'timeline-title';
+                titleSpan.textContent = ev.title;
+
+                topRow.appendChild(tsSpan);
+                topRow.appendChild(titleSpan);
+
+                if (ev.status) {
+                    const badge = document.createElement('span');
+                    badge.className = 'card-status status-' + ev.status;
+                    badge.textContent = ev.status;
+                    topRow.appendChild(badge);
+                }
+
+                bodyDiv.appendChild(topRow);
+
+                if (ev.sub) {
+                    const subDiv = document.createElement('div');
+                    subDiv.className = 'timeline-sub';
+                    subDiv.textContent = ev.sub;
+                    bodyDiv.appendChild(subDiv);
+                }
+
+                item.appendChild(iconSpan);
+                item.appendChild(bodyDiv);
+                tlList.appendChild(item);
+            });
+            tlSection.appendChild(tlList);
+            const tlNote = document.createElement('p');
+            tlNote.className = 'timeline-note';
+            tlNote.textContent = '📋 青: Hermesタスク　🔍 緑: agent-whisperトレース（最新20件）';
+            tlSection.appendChild(tlNote);
+        }
+        content.appendChild(tlSection);
+
         // Tasks section
         const taskSection = document.createElement('div');
         taskSection.style.marginTop = '1.5rem';
@@ -985,74 +1122,6 @@ async function showAgentDetail(agentId) {
                 clearInterval(agentLogInterval);
             }
         }, 3000);
-
-        // Timeline section: merge tasks + traces by timestamp
-        const tlSection = document.createElement('div');
-        tlSection.style.marginTop = '1.5rem';
-        const tlTitle = document.createElement('h4');
-        tlTitle.textContent = '📅 タイムライン（タスク + トレース）';
-        tlSection.appendChild(tlTitle);
-
-        const traceListForTL = Array.isArray(awTraces) ? awTraces : (awTraces && awTraces.traces ? awTraces.traces : []);
-        const taskListForTL = Array.isArray(agentTasks) ? agentTasks : [];
-
-        // Unify events
-        const tlEvents = [];
-        taskListForTL.forEach(t => {
-            tlEvents.push({
-                type: 'task',
-                time: new Date(t.created_at || 0).getTime(),
-                label: '🔧 ' + (t.title || 'タスク'),
-                sub: t.status + (t.progress != null ? ' / 進捗: ' + t.progress + '%' : ''),
-                ts: t.created_at ? new Date(t.created_at).toLocaleString('ja-JP') : '-',
-            });
-        });
-        traceListForTL.slice(0, 20).forEach(tr => {
-            tlEvents.push({
-                type: 'trace',
-                time: new Date(tr.started_at || 0).getTime(),
-                label: '🔍 ' + (tr.name || tr.trace_id || 'trace').substring(0, 24),
-                sub: (tr.agent_id || '') + ' / ツール: ' + (tr.tool_call_count || 0) + '件',
-                ts: tr.started_at ? new Date(tr.started_at).toLocaleString('ja-JP') : '-',
-            });
-        });
-        tlEvents.sort((a, b) => b.time - a.time);
-
-        if (tlEvents.length === 0) {
-            const emptyP = document.createElement('p');
-            emptyP.className = 'empty';
-            emptyP.textContent = 'タイムラインデータがありません';
-            tlSection.appendChild(emptyP);
-        } else {
-            const tlList = document.createElement('div');
-            tlList.style.cssText = 'display:flex;flex-direction:column;gap:6px;margin-top:0.5rem;max-height:320px;overflow-y:auto;padding-right:4px;';
-            tlEvents.forEach(ev => {
-                const item = document.createElement('div');
-                item.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:8px 10px;border-radius:6px;border-left:4px solid ' +
-                    (ev.type === 'task' ? '#4299e1' : '#48bb78') + ';background:' + (ev.type === 'task' ? '#ebf8ff' : '#f0fff4') + ';';
-                const tsSpan = document.createElement('span');
-                tsSpan.style.cssText = 'font-size:0.75rem;color:#718096;white-space:nowrap;min-width:130px;margin-top:1px;';
-                tsSpan.textContent = ev.ts;
-                const textDiv = document.createElement('div');
-                const nameSpan = document.createElement('div');
-                nameSpan.style.cssText = 'font-size:0.85rem;font-weight:600;';
-                nameSpan.textContent = ev.label;
-                const subSpan = document.createElement('div');
-                subSpan.style.cssText = 'font-size:0.78rem;color:#718096;margin-top:1px;';
-                subSpan.textContent = ev.sub;
-                textDiv.appendChild(nameSpan);
-                textDiv.appendChild(subSpan);
-                item.appendChild(tsSpan);
-                item.appendChild(textDiv);
-                tlList.appendChild(item);
-            });
-            tlSection.appendChild(tlList);
-            const tlNote = document.createElement('p');
-            tlNote.style.cssText = 'font-size:0.76rem;color:#a0aec0;margin-top:4px;';
-            tlNote.textContent = '🔧 青: Hermesタスク　🔍 緑: agent-whisperトレース（最新20件）';
-            tlSection.appendChild(tlNote);
-        }
-        content.appendChild(tlSection);
 
         // agent-whisper traces section
         const awSection = document.createElement('div');

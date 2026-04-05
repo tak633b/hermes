@@ -11,6 +11,7 @@ from pathlib import Path
 import json
 import asyncio
 import time
+import os
 
 app = FastAPI(title="Hermes Agent Orchestration")
 

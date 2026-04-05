@@ -692,6 +692,74 @@ async function showAgentDetail(agentId) {
             }
         }, 3000);
 
+        // Timeline section: merge tasks + traces by timestamp
+        const tlSection = document.createElement('div');
+        tlSection.style.marginTop = '1.5rem';
+        const tlTitle = document.createElement('h4');
+        tlTitle.textContent = '📅 タイムライン（タスク + トレース）';
+        tlSection.appendChild(tlTitle);
+
+        const traceListForTL = Array.isArray(awTraces) ? awTraces : (awTraces && awTraces.traces ? awTraces.traces : []);
+        const taskListForTL = Array.isArray(agentTasks) ? agentTasks : [];
+
+        // Unify events
+        const tlEvents = [];
+        taskListForTL.forEach(t => {
+            tlEvents.push({
+                type: 'task',
+                time: new Date(t.created_at || 0).getTime(),
+                label: '🔧 ' + (t.title || 'タスク'),
+                sub: t.status + (t.progress != null ? ' / 進捗: ' + t.progress + '%' : ''),
+                ts: t.created_at ? new Date(t.created_at).toLocaleString('ja-JP') : '-',
+            });
+        });
+        traceListForTL.slice(0, 20).forEach(tr => {
+            tlEvents.push({
+                type: 'trace',
+                time: new Date(tr.started_at || 0).getTime(),
+                label: '🔍 ' + (tr.name || tr.trace_id || 'trace').substring(0, 24),
+                sub: (tr.agent_id || '') + ' / ツール: ' + (tr.tool_call_count || 0) + '件',
+                ts: tr.started_at ? new Date(tr.started_at).toLocaleString('ja-JP') : '-',
+            });
+        });
+        tlEvents.sort((a, b) => b.time - a.time);
+
+        if (tlEvents.length === 0) {
+            const emptyP = document.createElement('p');
+            emptyP.className = 'empty';
+            emptyP.textContent = 'タイムラインデータがありません';
+            tlSection.appendChild(emptyP);
+        } else {
+            const tlList = document.createElement('div');
+            tlList.style.cssText = 'display:flex;flex-direction:column;gap:6px;margin-top:0.5rem;max-height:320px;overflow-y:auto;padding-right:4px;';
+            tlEvents.forEach(ev => {
+                const item = document.createElement('div');
+                item.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding:8px 10px;border-radius:6px;border-left:4px solid ' +
+                    (ev.type === 'task' ? '#4299e1' : '#48bb78') + ';background:' + (ev.type === 'task' ? '#ebf8ff' : '#f0fff4') + ';';
+                const tsSpan = document.createElement('span');
+                tsSpan.style.cssText = 'font-size:0.75rem;color:#718096;white-space:nowrap;min-width:130px;margin-top:1px;';
+                tsSpan.textContent = ev.ts;
+                const textDiv = document.createElement('div');
+                const nameSpan = document.createElement('div');
+                nameSpan.style.cssText = 'font-size:0.85rem;font-weight:600;';
+                nameSpan.textContent = ev.label;
+                const subSpan = document.createElement('div');
+                subSpan.style.cssText = 'font-size:0.78rem;color:#718096;margin-top:1px;';
+                subSpan.textContent = ev.sub;
+                textDiv.appendChild(nameSpan);
+                textDiv.appendChild(subSpan);
+                item.appendChild(tsSpan);
+                item.appendChild(textDiv);
+                tlList.appendChild(item);
+            });
+            tlSection.appendChild(tlList);
+            const tlNote = document.createElement('p');
+            tlNote.style.cssText = 'font-size:0.76rem;color:#a0aec0;margin-top:4px;';
+            tlNote.textContent = '🔧 青: Hermesタスク　🔍 緑: agent-whisperトレース（最新20件）';
+            tlSection.appendChild(tlNote);
+        }
+        content.appendChild(tlSection);
+
         // agent-whisper traces section
         const awSection = document.createElement('div');
         awSection.style.marginTop = '1.5rem';

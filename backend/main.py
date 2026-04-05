@@ -688,16 +688,18 @@ async def create_task(task: Task):
         agent_name = agent_row[0] if agent_row else "Unknown"
 
     # Send Discord notification for new task assignment
-    priority_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(task.priority or "medium", "🟡")
+    priority_val = task.priority or 0
+    priority_label = "🔴 高" if priority_val >= 2 else "🟡 中" if priority_val == 1 else "🟢 通常"
     fields = [
         {"name": "エージェント", "value": agent_name, "inline": True},
-        {"name": "優先度", "value": f"{priority_emoji} {task.priority or 'medium'}", "inline": True},
-        {"name": "タスクID", "value": task.id[:8] + "...", "inline": True},
+        {"name": "優先度", "value": priority_label, "inline": True},
+        {"name": "タスクID", "value": task.id, "inline": False},
     ]
     if task.description:
         fields.append({"name": "内容", "value": task.description[:500], "inline": False})
     if task.due_date:
         fields.append({"name": "期日", "value": task.due_date, "inline": True})
+    fields.append({"name": "完了報告コマンド", "value": f"`curl -s -X PUT http://localhost:8010/tasks/{task.id}/status -H 'Content-Type: application/json' -d '{{\"status\":\"completed\"}}'`", "inline": False})
     await send_discord_notification(
         title=f"📋 新しいタスク: {task.title}",
         description=f"**{agent_name}** に新しいタスクが割り当てられました。\n実行してください。",

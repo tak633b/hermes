@@ -135,8 +135,14 @@ class API {
         return this.request('/health');
     }
 
-    // Agent Whisper Traces
-    static getAgentWhisperTraces(agentId) {
-        return this.request(`/agent-whisper/traces?agent_id=${agentId}`);
+    // Agent Whisper integration (direct call to agent-whisper backend)
+    static async getAgentWhisperTraces(agentId, limit = 20) {
+        try {
+            const res = await fetch(`${AW_BASE_URL}/traces?agent_id=${encodeURIComponent(agentId)}&limit=${limit}`);
+            if (!res.ok) return [];
+            return await res.json();
+        } catch (_e) {
+            return [];
+        }
     }
 }

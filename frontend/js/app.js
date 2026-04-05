@@ -424,11 +424,12 @@ async function showAgentDetail(agentId) {
     currentAgentId = agentId;
 
     try {
-        const [agent, logs, memory, agentTasks] = await Promise.all([
+        const [agent, logs, memory, agentTasks, awTraces] = await Promise.all([
             API.getAgent(agentId),
             API.getAgentLogs(agentId),
             API.getAgentMemory(agentId),
-            API.getTasks(agentId)
+            API.getTasks(agentId),
+            API.getAgentWhisperTraces(agentId)
         ]);
 
         const modal = document.getElementById('agent-modal');
@@ -703,68 +704,63 @@ async function showAgentDetail(agentId) {
         awSection.appendChild(awLoading);
         content.appendChild(awSection);
 
-        modal.classList.add('active');
-
-        // Fetch agent-whisper traces asynchronously after modal is shown
-        try {
-            const awResp = await API.getAgentWhisperTraces(agent.id);
-            if (awResp && awResp.traces) {
-                const awTraces = awResp.traces;
-                awSection.removeChild(awLoading);
-                if (awTraces.length === 0) {
-                    const p = document.createElement('p');
-                    p.className = 'empty';
-                    p.textContent = 'トレースがありません（検索キー: ' + agent.name + '）';
-                    awSection.appendChild(p);
-                } else {
-                    const table = document.createElement('table');
-                    table.style.cssText = 'width:100%;border-collapse:collapse;font-size:0.82rem;';
-                    const thead = document.createElement('thead');
-                    const headerRow = document.createElement('tr');
-                    headerRow.style.cssText = 'background:#edf2f7;text-align:left;';
-                    ['Trace ID', 'Agent ID', '開始時刻', 'ツール数'].forEach(function(label) {
-                        const th = document.createElement('th');
-                        th.style.padding = '6px 8px';
-                        th.textContent = label;
-                        headerRow.appendChild(th);
-                    });
-                    thead.appendChild(headerRow);
-                    table.appendChild(thead);
-                    const tbody = document.createElement('tbody');
-                    awTraces.slice(0, 10).forEach(function(trace, i) {
-                        const tr = document.createElement('tr');
-                        tr.style.background = i % 2 === 0 ? '#fff' : '#f7fafc';
-                        const startedAt = trace.started_at
-                            ? new Date(trace.started_at).toLocaleString('ja-JP')
-                            : '-';
-                        [
-                            { text: trace.trace_id.substring(0, 8) + '…', style: 'padding:5px 8px;font-family:monospace;' },
-                            { text: String(trace.agent_id), style: 'padding:5px 8px;' },
-                            { text: startedAt, style: 'padding:5px 8px;' },
-                            { text: String(trace.tool_call_count), style: 'padding:5px 8px;text-align:center;' },
-                        ].forEach(function(cell) {
-                            const td = document.createElement('td');
-                            td.style.cssText = cell.style;
-                            td.textContent = cell.text;
+        // Render agent-whisper traces using pre-fetched data
+        awSection.removeChild(awLoading);
+        const traceList = Array.isArray(awTraces) ? awTraces : (awTraces && awTraces.traces ? awTraces.traces : []);
+        if (traceList.length === 0) {
+            const p = document.createElement('p');
+            p.className = 'empty';
+            p.textContent = 'トレースがありません（agent-whisper agent_id: ' + agentId + '）';
+            awSection.appendChild(p);
+        } else {
+            const traceNote = document.createElement('p');
+            traceNote.style.cssText = 'font-size:0.8rem;color:#718096;margin-bottom:0.5rem;';
+            traceNote.textContent = '直近 ' + traceList.length + ' 件（agent-whisper連携）';
+            awSection.appendChild(traceNote);
+            const table = document.createElement('table');
+            table.style.cssText = 'width:100%;border-collapse:collapse;font-size:0.82rem;';
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            headerRow.style.cssText = 'background:#ebf8ff;text-align:left;';
+            ['Trace ID', 'Agent ID', '開始時刻', 'ツール数'].forEach(function(label) {
+                const th = document.createElement('th');
+                th.style.padding = '6px 8px';
+                th.textContent = label;
+                headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+            const tbody = document.createElement('tbody');
+            traceList.slice(0, 10).forEach(function(trace, i) {
+                const tr = document.createElement('tr');
+                tr.style.background = i % 2 === 0 ? '#fff' : '#ebf8ff';
+                const startedAt = trace.started_at
+                    ? new Date(trace.started_at).toLocaleString('ja-JP')
+                    : '-';
+                [
+                    { text: (trace.trace_id || trace.id || '').substring(0, 8) + '…', style: 'padding:5px 8px;font-family:monospace;' },
+                    { text: String(trace.agent_id || '-'), style: 'padding:5px 8px;' },
+                    { text: startedAt, style: 'padding:5px 8px;' },
+                    { text: String(trace.tool_call_count || 0), style: 'padding:5px 8px;text-align:center;' },
+                ].forEach(function(cell) {
+                    const td = document.createElement('td');
+                    td.style.cssText = cell.style;
+                    td.textContent = cell.text;
                             tr.appendChild(td);
                         });
                         tbody.appendChild(tr);
                     });
-                    table.appendChild(tbody);
-                    awSection.appendChild(table);
-                    if (awTraces.length > 10) {
-                        const more = document.createElement('p');
-                        more.style.cssText = 'font-size:0.8rem;color:#718096;margin-top:0.5rem;';
-                        more.textContent = '…他 ' + (awTraces.length - 10) + ' 件（agent-whisper で確認）';
-                        awSection.appendChild(more);
-                    }
-                }
-            } else {
-                awLoading.textContent = 'agent-whisper に接続できません';
+            table.appendChild(tbody);
+            awSection.appendChild(table);
+            if (traceList.length > 10) {
+                const more = document.createElement('p');
+                more.style.cssText = 'font-size:0.8rem;color:#718096;margin-top:0.5rem;';
+                more.textContent = '…他 ' + (traceList.length - 10) + ' 件（agent-whisper で確認: http://localhost:9001）';
+                awSection.appendChild(more);
             }
-        } catch (_err) {
-            awLoading.textContent = 'agent-whisper に接続できません（エラー: ' + (_err?.message || 'Unknown') + '）';
         }
+
+        modal.classList.add('active');
     } catch (error) {
         alert('エージェント情報の取得に失敗しました: ' + error.message);
     }

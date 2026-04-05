@@ -52,6 +52,16 @@ function handleWsMessage(msg) {
 
         // Show toast
         showToast(`タスク ${msg.task_id.slice(0, 8)}... → ${msg.status}`);
+    } else if (msg.event === 'agent_status_changed') {
+        // Update agent status badge in agent cards
+        const agentBadge = document.getElementById('agent-status-badge-' + msg.agent_id);
+        if (agentBadge) {
+            agentBadge.className = 'card-status status-' + msg.status;
+            agentBadge.textContent = msg.status;
+        }
+        // Reload agent list to reflect updated status
+        loadAgents();
+        showToast(`エージェント ${msg.agent_id.slice(0, 8)}... → ${msg.status}`);
     } else if (msg.event === 'init') {
         console.log('[WS] Received initial state:', msg.agents?.length, 'agents');
     }
@@ -194,6 +204,11 @@ function setupEventListeners() {
 
     // Task status filter
     document.getElementById('task-status-filter').addEventListener('change', loadTasks);
+
+    // Task agent filter
+    document.addEventListener('change', (e) => {
+        if (e.target.id === 'task-agent-filter') loadTasks();
+    });
 
     // Modal close (task)
     document.getElementById('task-modal').addEventListener('click', (e) => {
@@ -556,8 +571,14 @@ async function loadAgentSelect() {
     try {
         const agents = await API.getAgents();
         const select = document.getElementById('task-agent');
-        select.innerHTML = '<option value="">選択してください</option>' + 
-            agents.map(agent => `<option value="${agent.id}">${escapeHtml(agent.name)}</option>`).join('');
+        const options = agents.map(agent => `<option value="${agent.id}">${escapeHtml(agent.name)}</option>`).join('');
+        select.innerHTML = '<option value="">選択してください</option>' + options;
+
+        // Also populate the agent filter dropdown in task list
+        const filterSelect = document.getElementById('task-agent-filter');
+        if (filterSelect) {
+            filterSelect.innerHTML = '<option value="">すべて</option>' + options;
+        }
     } catch (error) {
         console.error('Load agent select error:', error);
     }
@@ -566,7 +587,8 @@ async function loadAgentSelect() {
 async function loadTasks() {
     try {
         const status = document.getElementById('task-status-filter').value;
-        const tasks = await API.getTasks(null, status || null);
+        const agentId = document.getElementById('task-agent-filter')?.value || null;
+        const tasks = await API.getTasks(agentId || null, status || null);
         displayTasks(tasks);
     } catch (error) {
         console.error('Load tasks error:', error);

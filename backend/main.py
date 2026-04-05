@@ -136,6 +136,17 @@ def init_db():
             conn.execute("ALTER TABLE agents ADD COLUMN tool_calls TEXT")
         except Exception:
             pass
+        # Migrate: add priority, due_date, max_retries, retry_count to tasks
+        for col, definition in [
+            ("priority", "INTEGER DEFAULT 0"),
+            ("due_date", "TEXT"),
+            ("max_retries", "INTEGER DEFAULT 0"),
+            ("retry_count", "INTEGER DEFAULT 0"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {definition}")
+            except Exception:
+                pass
 
 
 init_db()
@@ -379,6 +390,10 @@ class Task(BaseModel):
     error: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    priority: int = 0
+    due_date: Optional[str] = None
+    max_retries: int = 0
+    retry_count: int = 0
 
 
 class SystemStatus(BaseModel):
@@ -587,10 +602,11 @@ async def create_task(task: Task):
     task.updated_at = task.created_at
     with get_db() as conn:
         conn.execute(
-            "INSERT INTO tasks (id, agent_id, title, description, status, progress, result, error, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO tasks (id, agent_id, title, description, status, progress, result, error, created_at, updated_at, priority, due_date, max_retries, retry_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (task.id, task.agent_id, task.title, task.description, task.status,
              task.progress, json.dumps(task.result) if task.result else None,
-             task.error, task.created_at, task.updated_at)
+             task.error, task.created_at, task.updated_at,
+             task.priority, task.due_date, task.max_retries, task.retry_count)
         )
     return task
 
@@ -677,15 +693,21 @@ async def update_task_status(task_id: str, body: dict = Body(...)):
 
     task_title = task_id
     agent_name = None
+    retried = False
     with get_db() as conn:
         row = conn.execute(
-            "SELECT tasks.id, tasks.title, agents.name FROM tasks LEFT JOIN agents ON tasks.agent_id = agents.id WHERE tasks.id = ?",
+            "SELECT tasks.id, tasks.title, agents.name, tasks.max_retries, tasks.retry_count, tasks.agent_id "
+            "FROM tasks LEFT JOIN agents ON tasks.agent_id = agents.id WHERE tasks.id = ?",
             (task_id,)
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Task not found")
         task_title = row[1] or task_id
         agent_name = row[2]
+        max_retries = row[3] or 0
+        retry_count = row[4] or 0
+        agent_id_for_retry = row[5]
+
         if progress_val is not None:
             conn.execute(
                 "UPDATE tasks SET status=?, progress=?, updated_at=? WHERE id=?",
@@ -696,6 +718,24 @@ async def update_task_status(task_id: str, body: dict = Body(...)):
                 "UPDATE tasks SET status=?, updated_at=? WHERE id=?",
                 (new_status, updated_at, task_id)
             )
+
+        # Auto-retry logic: if failed and retries remaining, create new pending task
+        if new_status == "failed" and retry_count < max_retries:
+            new_retry_count = retry_count + 1
+            conn.execute(
+                "UPDATE tasks SET retry_count=? WHERE id=?",
+                (new_retry_count, task_id)
+            )
+            retry_task_id = str(uuid.uuid4())
+            retry_at = datetime.utcnow().isoformat()
+            conn.execute(
+                "INSERT INTO tasks (id, agent_id, title, description, status, progress, result, error, "
+                "created_at, updated_at, priority, due_date, max_retries, retry_count) "
+                "SELECT ?, agent_id, title || ' (retry ' || ? || ')', description, 'pending', 0, NULL, NULL, "
+                "?, ?, priority, due_date, max_retries, ? FROM tasks WHERE id=?",
+                (retry_task_id, new_retry_count, retry_at, retry_at, new_retry_count, task_id)
+            )
+            retried = True
 
     await ws_manager.broadcast({
         "event": "task_status_changed",
@@ -709,6 +749,8 @@ async def update_task_status(task_id: str, body: dict = Body(...)):
         fields = [{"name": "Task", "value": task_title, "inline": True}]
         if agent_name:
             fields.append({"name": "Agent", "value": agent_name, "inline": True})
+        if retried:
+            fields.append({"name": "Auto-Retry", "value": f"再試行タスクを自動作成しました（{retry_count + 1}/{max_retries}）", "inline": False})
         await send_discord_notification(
             title=f"{status_emoji} Task {new_status.capitalize()}",
             description=f"Task status changed to **{new_status}**",
@@ -716,7 +758,7 @@ async def update_task_status(task_id: str, body: dict = Body(...)):
             fields=fields,
         )
 
-    return {"task_id": task_id, "status": new_status, "updated_at": updated_at}
+    return {"task_id": task_id, "status": new_status, "updated_at": updated_at, "retried": retried}
 
 
 @app.websocket("/ws")

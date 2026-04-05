@@ -221,10 +221,13 @@ function setupEventListeners() {
 
         try {
             await API.createTask(agentId, title, description);
-            alert('タスクを作成しました');
             document.getElementById('task-form').reset();
             document.getElementById('create-task-form').style.display = 'none';
+            // Switch to Tasks tab and reload
+            const tasksNavBtn = document.querySelector('[data-section="tasks-section"]');
+            if (tasksNavBtn) tasksNavBtn.click();
             loadTasks();
+            showToast('タスクを作成しました');
         } catch (error) {
             alert('エラー: ' + error.message);
         }

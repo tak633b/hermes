@@ -283,6 +283,84 @@ body {
     color: #742a2a;
 }
 
+.status-alert {
+    background-color: #feebc8;
+    color: #744210;
+}
+
+/* Timeline */
+.timeline-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 0.5rem;
+    max-height: 360px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.timeline-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border-left: 4px solid #4299e1;
+    background: #ebf8ff;
+}
+
+.timeline-item-trace {
+    border-left-color: #48bb78;
+    background: #f0fff4;
+}
+
+.timeline-icon {
+    font-size: 1rem;
+    line-height: 1.4;
+    flex-shrink: 0;
+}
+
+.timeline-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.timeline-top-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.timeline-ts {
+    font-size: 0.75rem;
+    color: #718096;
+    white-space: nowrap;
+    font-family: monospace;
+}
+
+.timeline-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #2d3748;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 220px;
+}
+
+.timeline-sub {
+    font-size: 0.78rem;
+    color: #718096;
+    margin-top: 2px;
+}
+
+.timeline-note {
+    font-size: 0.76rem;
+    color: #a0aec0;
+    margin-top: 4px;
+}
+
 .card-description {
     color: #718096;
     margin-bottom: 1rem;

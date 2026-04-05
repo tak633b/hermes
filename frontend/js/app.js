@@ -214,57 +214,102 @@ function setEmptyMessage(container, text) {
     container.appendChild(p);
 }
 
-async function runTraceSearch() {
+// Trace search pagination state
+const traceSearchState = { query: '', offset: 0, limit: 20 };
+
+async function runTraceSearch(offset = 0) {
     const query = document.getElementById('trace-search-input').value.trim();
     const container = document.getElementById('trace-search-results');
     if (!query) {
         setEmptyMessage(container, 'キーワードを入力してください');
         return;
     }
+    traceSearchState.query = query;
+    traceSearchState.offset = offset;
+
     setEmptyMessage(container, '検索中...');
-    const traces = await API.searchAgentWhisperTraces(query);
-    if (traces.length === 0) {
+    let traces;
+    try {
+        traces = await API.searchTraces(query, traceSearchState.limit, offset);
+    } catch (_e) {
+        setEmptyMessage(container, '検索に失敗しました。agent-whisper に接続できません。');
+        return;
+    }
+
+    container.textContent = '';
+
+    if (traces.length === 0 && offset === 0) {
         setEmptyMessage(container, `「${query}」に一致するトレースが見つかりません`);
         return;
     }
-    const table = document.createElement('table');
-    table.style.cssText = 'width:100%;border-collapse:collapse;font-size:0.85rem;margin-top:0.5rem;';
-    const thead = document.createElement('thead');
-    const headerRow = document.createElement('tr');
-    headerRow.style.cssText = 'background:#edf2f7;text-align:left;';
-    ['Trace ID', 'Agent ID', '開始時刻', 'ツール数'].forEach(label => {
-        const th = document.createElement('th');
-        th.style.padding = '6px 8px';
-        th.textContent = label;
-        headerRow.appendChild(th);
-    });
-    thead.appendChild(headerRow);
-    table.appendChild(thead);
-    const tbody = document.createElement('tbody');
-    traces.forEach((trace, i) => {
-        const tr = document.createElement('tr');
-        tr.style.background = i % 2 === 0 ? '#fff' : '#f7fafc';
-        const startedAt = trace.started_at ? new Date(trace.started_at).toLocaleString('ja-JP') : '-';
-        [
-            { text: trace.trace_id ? trace.trace_id.substring(0, 12) + '…' : '-', style: 'padding:5px 8px;font-family:monospace;' },
-            { text: String(trace.agent_id || '-'), style: 'padding:5px 8px;' },
-            { text: startedAt, style: 'padding:5px 8px;' },
-            { text: String(trace.tool_call_count || 0), style: 'padding:5px 8px;text-align:center;' },
-        ].forEach(cell => {
-            const td = document.createElement('td');
-            td.style.cssText = cell.style;
-            td.textContent = cell.text;
-            tr.appendChild(td);
-        });
-        tbody.appendChild(tr);
-    });
-    table.appendChild(tbody);
-    container.textContent = '';
+
     const summary = document.createElement('p');
     summary.style.cssText = 'font-size:0.82rem;color:#718096;margin-bottom:0.5rem;';
-    summary.textContent = `${traces.length} 件のトレースが見つかりました（検索: "${query}"）`;
+    const pageNum = Math.floor(offset / traceSearchState.limit) + 1;
+    summary.textContent = `${traces.length} 件表示中（ページ ${pageNum}、検索: "${query}"）`;
     container.appendChild(summary);
-    container.appendChild(table);
+
+    if (traces.length > 0) {
+        const table = document.createElement('table');
+        table.style.cssText = 'width:100%;border-collapse:collapse;font-size:0.85rem;margin-top:0.5rem;';
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        headerRow.style.cssText = 'background:#edf2f7;text-align:left;';
+        ['Trace ID', 'Agent ID', '開始時刻', 'ツール数'].forEach(label => {
+            const th = document.createElement('th');
+            th.style.padding = '6px 8px';
+            th.textContent = label;
+            headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+        const tbody = document.createElement('tbody');
+        traces.forEach((trace, i) => {
+            const tr = document.createElement('tr');
+            tr.style.background = i % 2 === 0 ? '#fff' : '#f7fafc';
+            const startedAt = trace.started_at ? new Date(trace.started_at).toLocaleString('ja-JP') : '-';
+            [
+                { text: trace.trace_id ? trace.trace_id.substring(0, 12) + '…' : '-', style: 'padding:5px 8px;font-family:monospace;' },
+                { text: String(trace.agent_id || '-'), style: 'padding:5px 8px;' },
+                { text: startedAt, style: 'padding:5px 8px;' },
+                { text: String(trace.tool_call_count || 0), style: 'padding:5px 8px;text-align:center;' },
+            ].forEach(cell => {
+                const td = document.createElement('td');
+                td.style.cssText = cell.style;
+                td.textContent = cell.text;
+                tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        container.appendChild(table);
+    } else {
+        const emptyMsg = document.createElement('p');
+        emptyMsg.className = 'empty';
+        emptyMsg.textContent = 'これ以上の結果はありません';
+        container.appendChild(emptyMsg);
+    }
+
+    // Pagination controls
+    const pagination = document.createElement('div');
+    pagination.style.cssText = 'display:flex;gap:0.5rem;margin-top:0.75rem;align-items:center;';
+    if (offset > 0) {
+        const prevBtn = document.createElement('button');
+        prevBtn.className = 'btn btn-secondary';
+        prevBtn.textContent = '← 前へ';
+        prevBtn.addEventListener('click', () => runTraceSearch(offset - traceSearchState.limit));
+        pagination.appendChild(prevBtn);
+    }
+    if (traces.length === traceSearchState.limit) {
+        const nextBtn = document.createElement('button');
+        nextBtn.className = 'btn btn-secondary';
+        nextBtn.textContent = '次へ →';
+        nextBtn.addEventListener('click', () => runTraceSearch(offset + traceSearchState.limit));
+        pagination.appendChild(nextBtn);
+    }
+    if (pagination.children.length > 0) {
+        container.appendChild(pagination);
+    }
 }
 
 function switchTab(tabName) {

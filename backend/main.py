@@ -476,11 +476,13 @@ async def get_agents_health():
                 async with aiohttp.ClientSession() as session:
                     async with session.get(
                         f"{aw_url}/traces",
-                        params={"agent_id": aname, "limit": 1},
+                        params={"q": aname, "limit": 1},
                         timeout=aiohttp.ClientTimeout(total=3)
                     ) as resp:
                         if resp.status == 200:
-                            traces = await resp.json()
+                            data = await resp.json()
+                            # Support paginated {items, total} and legacy plain list
+                            traces = data.get("items", data) if isinstance(data, dict) else data
                             if traces and isinstance(traces, list) and traces[0].get("started_at"):
                                 aw_last_trace_at = traces[0]["started_at"]
             except Exception:

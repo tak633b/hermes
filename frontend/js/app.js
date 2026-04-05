@@ -507,6 +507,64 @@ async function showAgentDetail(agentId) {
         h2.textContent = agent.name;
         content.appendChild(h2);
 
+        // Edit button
+        const editBtn = document.createElement('button');
+        editBtn.className = 'btn btn-warning btn-small';
+        editBtn.textContent = '✏️ 編集';
+        editBtn.style.marginTop = '0.5rem';
+        content.appendChild(editBtn);
+
+        // Edit form (hidden by default)
+        const editForm = document.createElement('div');
+        editForm.style.cssText = 'display:none;margin-top:1rem;background:#f7fafc;padding:1rem;border-radius:6px;';
+        editForm.innerHTML = '';
+
+        const nameLabel = document.createElement('label');
+        nameLabel.textContent = 'エージェント名';
+        nameLabel.style.cssText = 'display:block;font-weight:bold;margin-bottom:0.25rem;';
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.value = agent.name;
+        nameInput.style.cssText = 'width:100%;margin-bottom:0.75rem;padding:0.4rem;border:1px solid #cbd5e0;border-radius:4px;box-sizing:border-box;';
+
+        const descLabel = document.createElement('label');
+        descLabel.textContent = '説明';
+        descLabel.style.cssText = 'display:block;font-weight:bold;margin-bottom:0.25rem;';
+        const descInput = document.createElement('textarea');
+        descInput.value = agent.description || '';
+        descInput.rows = 3;
+        descInput.style.cssText = 'width:100%;margin-bottom:0.75rem;padding:0.4rem;border:1px solid #cbd5e0;border-radius:4px;box-sizing:border-box;';
+
+        const saveBtnEdit = document.createElement('button');
+        saveBtnEdit.className = 'btn btn-primary btn-small';
+        saveBtnEdit.textContent = '保存';
+        const cancelBtnEdit = document.createElement('button');
+        cancelBtnEdit.className = 'btn btn-secondary btn-small';
+        cancelBtnEdit.textContent = 'キャンセル';
+        cancelBtnEdit.style.marginLeft = '0.5rem';
+
+        editForm.appendChild(nameLabel);
+        editForm.appendChild(nameInput);
+        editForm.appendChild(descLabel);
+        editForm.appendChild(descInput);
+        editForm.appendChild(saveBtnEdit);
+        editForm.appendChild(cancelBtnEdit);
+        content.appendChild(editForm);
+
+        editBtn.addEventListener('click', () => { editForm.style.display = 'block'; editBtn.style.display = 'none'; });
+        cancelBtnEdit.addEventListener('click', () => { editForm.style.display = 'none'; editBtn.style.display = ''; });
+        saveBtnEdit.addEventListener('click', async () => {
+            try {
+                await API.updateAgent(agentId, { name: nameInput.value.trim(), description: descInput.value.trim() });
+                h2.textContent = nameInput.value.trim();
+                editForm.style.display = 'none';
+                editBtn.style.display = '';
+                await loadAgents();
+            } catch (err) {
+                alert('保存に失敗しました: ' + err.message);
+            }
+        });
+
         // Basic info
         const info = document.createElement('div');
         info.style.marginTop = '1rem';

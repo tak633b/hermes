@@ -127,6 +127,14 @@ class API {
     }
 
     // Status
+    static updateAgent(agentId, data) {
+        return this.request(`/agents/${agentId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+    }
+
     static getStatus() {
         return this.request('/status');
     }
@@ -154,5 +162,12 @@ class API {
         } catch (_e) {
             return [];
         }
+    }
+
+    static async searchTraces(query, limit = 20, offset = 0) {
+        const url = `${AW_BASE_URL}/traces?q=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}`;
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error('agent-whisper search failed');
+        return await resp.json();
     }
 }

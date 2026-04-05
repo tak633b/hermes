@@ -439,6 +439,27 @@ async def get_agent(agent_id: str):
     return row_to_agent(row)
 
 
+@app.put("/agents/{agent_id}")
+async def update_agent(agent_id: str, body: dict = Body(...)):
+    """Update agent name, description, and/or parameters."""
+    allowed = {"name", "description", "parameters"}
+    updates = {k: v for k, v in body.items() if k in allowed}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+    with get_db() as conn:
+        row = conn.execute("SELECT id FROM agents WHERE id = ?", (agent_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        for field, value in updates.items():
+            if field == "parameters":
+                conn.execute(f"UPDATE agents SET {field} = ? WHERE id = ?",
+                             (json.dumps(value), agent_id))
+            else:
+                conn.execute(f"UPDATE agents SET {field} = ? WHERE id = ?",
+                             (value, agent_id))
+    return {"agent_id": agent_id, "updated": list(updates.keys())}
+
+
 @app.put("/agents/{agent_id}/tool_calls")
 async def update_agent_tool_calls(agent_id: str, tool_calls: List[ToolCall]):
     with get_db() as conn:

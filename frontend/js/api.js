@@ -191,6 +191,15 @@ class API {
         return Array.isArray(data) ? data : (data.items || []);
     }
 
+    // Agent Health
+    static async getAgentsHealth() {
+        try {
+            return await this.request('/agents/health');
+        } catch (_e) {
+            return [];
+        }
+    }
+
     // Unified Timeline
     static async getTimeline(agentId = null, limit = 50) {
         let endpoint = `/timeline?limit=${limit}`;

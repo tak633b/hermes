@@ -23,6 +23,7 @@
             <button class="nav-btn" data-tab="traces">🔍 AWトレース</button>
             <button class="nav-btn" data-tab="timeline">📅 タイムライン</button>
             <button class="nav-btn" data-tab="compare">📊 比較</button>
+            <button class="nav-btn" data-tab="health">💚 ヘルス</button>
         </nav>
 
         <!-- Dashboard Tab -->
@@ -210,6 +211,17 @@
             <button class="btn btn-secondary" id="compare-refresh-btn">更新</button>
         </div>
         <div id="compare-content">
+            <p class="empty">読み込み中...</p>
+        </div>
+    </div>
+
+    <!-- Health Tab -->
+    <div class="tab-content" id="health">
+        <div class="section-header">
+            <h3>💚 エージェントヘルス</h3>
+            <button class="btn btn-secondary" id="health-refresh-btn">更新</button>
+        </div>
+        <div id="health-content">
             <p class="empty">読み込み中...</p>
         </div>
     </div>

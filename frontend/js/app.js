@@ -376,6 +376,8 @@ function switchTab(tabName) {
         loadAwTraces();
     } else if (tabName === 'compare') {
         loadCompare();
+    } else if (tabName === 'health') {
+        loadHealth();
     }
 }
 
@@ -1683,3 +1685,42 @@ function renderTimeline(container, items) {
 
     container.appendChild(list);
 }
+
+
+async function loadHealth() {
+    const container = document.getElementById('health-content');
+    container.innerHTML = '<p class="empty">読み込み中...</p>';
+    const healthData = await API.getAgentsHealth();
+    if (!healthData || healthData.length === 0) {
+        container.innerHTML = '<p class="empty">エージェントなし</p>';
+        return;
+    }
+    container.innerHTML = '';
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1rem;';
+    healthData.forEach(agent => {
+        const card = document.createElement('div');
+        card.style.cssText = 'background:#1e1e2e;border:1px solid #333;border-radius:8px;padding:1rem;';
+        const statusColor = agent.status === 'running' ? '#50fa7b' : agent.status === 'error' ? '#ff5555' : '#6272a4';
+        const errorColor = agent.error_rate > 20 ? '#ff5555' : agent.error_rate > 5 ? '#ffb86c' : '#50fa7b';
+        const lastAct = agent.aw_last_trace_at || agent.last_task_at;
+        const lastActStr = lastAct ? new Date(lastAct).toLocaleString('ja-JP') : 'なし';
+        card.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+                <strong style="font-size:1rem;">${agent.agent_name}</strong>
+                <span style="background:${statusColor}22;color:${statusColor};border:1px solid ${statusColor};border-radius:4px;padding:2px 8px;font-size:0.75rem;">${agent.status}</span>
+            </div>
+            <table style="width:100%;font-size:0.82rem;border-collapse:collapse;">
+                <tr><td style="color:#6272a4;padding:2px 0;">エラー率</td><td style="color:${errorColor};text-align:right;font-weight:bold;">${agent.error_rate}%</td></tr>
+                <tr><td style="color:#6272a4;padding:2px 0;">総タスク</td><td style="text-align:right;">${agent.total_tasks}</td></tr>
+                <tr><td style="color:#6272a4;padding:2px 0;">完了</td><td style="color:#50fa7b;text-align:right;">${agent.completed_tasks}</td></tr>
+                <tr><td style="color:#6272a4;padding:2px 0;">失敗</td><td style="color:#ff5555;text-align:right;">${agent.failed_tasks}</td></tr>
+                <tr><td style="color:#6272a4;padding:2px 0;">最終活動</td><td style="text-align:right;font-size:0.75rem;">${lastActStr}</td></tr>
+            </table>
+        `;
+        grid.appendChild(card);
+    });
+    container.appendChild(grid);
+}
+
+document.getElementById('health-refresh-btn')?.addEventListener('click', loadHealth);

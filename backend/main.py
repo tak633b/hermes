@@ -451,6 +451,55 @@ async def create_agent(agent: Agent):
     return agent
 
 
+@app.get("/agents/health")
+async def get_agents_health():
+    """エージェントごとのヘルスメトリクスを返す。タスク統計 + agent-whisper最終トレース時刻を含む。"""
+    with get_db() as conn:
+        agents = [dict(r) for r in conn.execute("SELECT id, name, status FROM agents").fetchall()]
+        result = []
+        for agent in agents:
+            aid = agent["id"]
+            aname = agent["name"]
+            rows = conn.execute(
+                "SELECT status, created_at, updated_at FROM tasks WHERE agent_id = ? ORDER BY created_at DESC",
+                (aid,)
+            ).fetchall()
+            total = len(rows)
+            completed = sum(1 for r in rows if r["status"] == "completed")
+            failed = sum(1 for r in rows if r["status"] == "failed")
+            error_rate = round(failed / (completed + failed) * 100, 1) if (completed + failed) > 0 else 0.0
+            last_task_at = rows[0]["updated_at"] if rows else None
+
+            aw_last_trace_at = None
+            try:
+                aw_url = os.environ.get("AW_BASE_URL", "http://agent-whisper:8000")
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"{aw_url}/traces",
+                        params={"agent_id": aname, "limit": 1},
+                        timeout=aiohttp.ClientTimeout(total=3)
+                    ) as resp:
+                        if resp.status == 200:
+                            traces = await resp.json()
+                            if traces and isinstance(traces, list) and traces[0].get("started_at"):
+                                aw_last_trace_at = traces[0]["started_at"]
+            except Exception:
+                pass
+
+            result.append({
+                "agent_id": aid,
+                "agent_name": aname,
+                "status": agent["status"],
+                "total_tasks": total,
+                "completed_tasks": completed,
+                "failed_tasks": failed,
+                "error_rate": error_rate,
+                "last_task_at": last_task_at,
+                "aw_last_trace_at": aw_last_trace_at,
+            })
+    return result
+
+
 @app.get("/agents/{agent_id}", response_model=Agent)
 async def get_agent(agent_id: str):
     with get_db() as conn:

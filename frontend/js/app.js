@@ -157,6 +157,13 @@ function setupEventListeners() {
         if (e.key === 'Enter') runTraceSearch();
     });
 
+    // Timeline tab
+    document.getElementById('timeline-refresh-btn').addEventListener('click', () => loadTimeline());
+    document.getElementById('timeline-agent-filter').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') loadTimeline();
+    });
+    document.getElementById('timeline-limit').addEventListener('change', () => loadTimeline());
+
     document.getElementById('cancel-task-btn').addEventListener('click', () => {
         document.getElementById('create-task-form').style.display = 'none';
         document.getElementById('task-form').reset();
@@ -343,6 +350,8 @@ function switchTab(tabName) {
         loadAgents();
     } else if (tabName === 'tasks') {
         loadTasks();
+    } else if (tabName === 'timeline') {
+        loadTimeline();
     } else if (tabName === 'traces') {
         loadAwTraces();
     }
@@ -1293,4 +1302,155 @@ function escapeHtml(text) {
         "'": '&#039;'
     };
     return String(text).replace(/[&<>"']/g, m => map[m]);
+}
+
+// ---- Timeline Tab ----
+
+async function loadTimeline() {
+    const container = document.getElementById('timeline-list');
+    const agentFilter = document.getElementById('timeline-agent-filter').value.trim();
+    const limit = parseInt(document.getElementById('timeline-limit').value, 10) || 50;
+
+    setEmptyMessage(container, '読み込み中...');
+
+    // Fetch from Hermes backend /timeline (merges tasks + AW traces server-side)
+    let hermesItems = [];
+    try {
+        let url = `${API_BASE_URL}/timeline?limit=${limit}`;
+        if (agentFilter) url += `&agent_id=${encodeURIComponent(agentFilter)}`;
+        const res = await fetch(url);
+        if (res.ok) hermesItems = await res.json();
+    } catch (_e) {}
+
+    // Also fetch AW traces directly (client-side merge for freshness)
+    let awItems = [];
+    try {
+        let awUrl = `${AW_BASE_URL}/traces?limit=${limit}`;
+        if (agentFilter) awUrl += `&agent_id=${encodeURIComponent(agentFilter)}`;
+        const res = await fetch(awUrl);
+        if (res.ok) {
+            const traces = await res.json();
+            awItems = (Array.isArray(traces) ? traces : []).map(tr => ({
+                type: 'trace',
+                timestamp: tr.started_at || tr.created_at || '',
+                title: tr.trace_id || '',
+                status: tr.status || '',
+                agent_id: String(tr.agent_id || ''),
+                details: {
+                    trace_id: tr.trace_id,
+                    tool_call_count: tr.tool_call_count || 0,
+                    session_id: tr.session_id || '',
+                    ended_at: tr.ended_at || '',
+                },
+            }));
+        }
+    } catch (_e) {}
+
+    // Merge: de-duplicate traces already returned by backend by trace_id
+    const backendTraceIds = new Set(
+        hermesItems.filter(i => i.type === 'trace').map(i => i.details && i.details.trace_id)
+    );
+    const extraAW = awItems.filter(i => !backendTraceIds.has(i.details && i.details.trace_id));
+    const merged = [...hermesItems, ...extraAW];
+    merged.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+    const final = merged.slice(0, limit);
+
+    renderTimeline(container, final);
+}
+
+function renderTimeline(container, items) {
+    container.textContent = '';
+
+    if (items.length === 0) {
+        setEmptyMessage(container, 'タイムラインデータがありません');
+        return;
+    }
+
+    const note = document.createElement('p');
+    note.style.cssText = 'font-size:0.78rem;color:#a0aec0;margin-bottom:0.75rem;padding:0 0.5rem;';
+    note.textContent = items.length + ' 件表示　青: Hermesタスク　緑: AWトレース';
+    container.appendChild(note);
+
+    const list = document.createElement('div');
+    list.style.cssText = 'display:flex;flex-direction:column;gap:8px;padding:0 0.25rem;';
+
+    items.forEach(item => {
+        const isTask = item.type === 'task';
+        const borderColor = isTask ? '#4299e1' : '#48bb78';
+        const bgColor = isTask ? '#ebf8ff' : '#f0fff4';
+        const badgeBg = isTask ? '#4299e1' : '#48bb78';
+
+        const card = document.createElement('div');
+        card.style.cssText = 'display:flex;align-items:flex-start;gap:12px;padding:10px 14px;border-radius:8px;border-left:4px solid ' + borderColor + ';background:' + bgColor + ';';
+
+        // Timestamp column
+        const tsDiv = document.createElement('div');
+        tsDiv.style.cssText = 'min-width:140px;font-size:0.75rem;color:#718096;padding-top:2px;white-space:nowrap;';
+        tsDiv.textContent = item.timestamp ? new Date(item.timestamp).toLocaleString('ja-JP') : '-';
+        card.appendChild(tsDiv);
+
+        // Main content column
+        const body = document.createElement('div');
+        body.style.cssText = 'flex:1;min-width:0;';
+
+        // Top row: type badge + title + status
+        const topRow = document.createElement('div');
+        topRow.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+
+        const badge = document.createElement('span');
+        badge.style.cssText = 'display:inline-block;font-size:0.68rem;font-weight:700;color:#fff;background:' + badgeBg + ';padding:2px 7px;border-radius:10px;text-transform:uppercase;letter-spacing:0.04em;';
+        badge.textContent = isTask ? 'TASK' : 'TRACE';
+        topRow.appendChild(badge);
+
+        const title = document.createElement('span');
+        title.style.cssText = 'font-size:0.87rem;font-weight:600;color:#2d3748;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:320px;';
+        const titleText = item.title || '-';
+        title.title = titleText;
+        title.textContent = titleText.length > 48 ? titleText.substring(0, 48) + '\u2026' : titleText;
+        topRow.appendChild(title);
+
+        if (item.status) {
+            const statusBadge = document.createElement('span');
+            statusBadge.className = 'card-status status-' + item.status;
+            statusBadge.textContent = item.status;
+            topRow.appendChild(statusBadge);
+        }
+        body.appendChild(topRow);
+
+        // Sub row: agent_id + details
+        const subRow = document.createElement('div');
+        subRow.style.cssText = 'font-size:0.77rem;color:#718096;margin-top:4px;display:flex;gap:12px;flex-wrap:wrap;';
+
+        if (item.agent_id) {
+            const agentSpan = document.createElement('span');
+            agentSpan.textContent = 'Agent: ' + item.agent_id;
+            subRow.appendChild(agentSpan);
+        }
+
+        if (isTask && item.details) {
+            const progressSpan = document.createElement('span');
+            progressSpan.textContent = '\u9032\u6357: ' + (item.details.progress || 0) + '%';
+            subRow.appendChild(progressSpan);
+            if (item.details.updated_at) {
+                const updSpan = document.createElement('span');
+                updSpan.textContent = '\u66f4\u65b0: ' + new Date(item.details.updated_at).toLocaleString('ja-JP');
+                subRow.appendChild(updSpan);
+            }
+        } else if (!isTask && item.details) {
+            const toolSpan = document.createElement('span');
+            toolSpan.textContent = '\u30c4\u30fc\u30eb: ' + (item.details.tool_call_count || 0) + '\u4ef6';
+            subRow.appendChild(toolSpan);
+            if (item.details.trace_id) {
+                const trSpan = document.createElement('span');
+                trSpan.style.fontFamily = 'monospace';
+                trSpan.textContent = 'ID: ' + item.details.trace_id.substring(0, 16) + '\u2026';
+                subRow.appendChild(trSpan);
+            }
+        }
+        body.appendChild(subRow);
+        card.appendChild(body);
+        list.appendChild(card);
+    });
+
+    container.appendChild(list);
 }

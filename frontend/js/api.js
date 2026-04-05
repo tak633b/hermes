@@ -177,4 +177,15 @@ class API {
         if (!response.ok) return [];
         return response.json();
     }
+
+    // Unified Timeline
+    static async getTimeline(agentId = null, limit = 50) {
+        let endpoint = `/timeline?limit=${limit}`;
+        if (agentId) endpoint += `&agent_id=${encodeURIComponent(agentId)}`;
+        try {
+            return await this.request(endpoint);
+        } catch (_e) {
+            return [];
+        }
+    }
 }

@@ -931,6 +931,82 @@ async def get_status():
     )
 
 
+@app.get("/timeline")
+async def get_timeline(
+    agent_id: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """
+    Unified timeline of Hermes tasks and agent-whisper traces, merged and sorted by timestamp.
+    Each item has: type, timestamp, title, status, agent_id, and relevant details.
+    """
+    # Fetch Hermes tasks
+    query = "SELECT id, agent_id, title, description, status, progress, created_at, updated_at FROM tasks WHERE 1=1"
+    params: list = []
+    if agent_id:
+        query += " AND agent_id = ?"
+        params.append(agent_id)
+    query += " ORDER BY created_at DESC LIMIT ?"
+    params.append(limit)
+
+    with get_db() as conn:
+        task_rows = conn.execute(query, params).fetchall()
+
+    timeline: list[dict] = []
+    for row in task_rows:
+        d = dict(row)
+        ts = d.get("created_at") or ""
+        timeline.append({
+            "type": "task",
+            "timestamp": ts,
+            "title": d.get("title", ""),
+            "status": d.get("status", ""),
+            "agent_id": d.get("agent_id", ""),
+            "details": {
+                "id": d.get("id"),
+                "description": d.get("description", ""),
+                "progress": d.get("progress", 0),
+                "updated_at": d.get("updated_at", ""),
+            },
+        })
+
+    # Fetch agent-whisper traces
+    try:
+        aw_url = "http://agent-whisper:8000"
+        aw_params: dict = {"limit": limit}
+        if agent_id:
+            aw_params["agent_id"] = agent_id
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{aw_url}/traces",
+                params=aw_params,
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                if resp.status == 200:
+                    traces = await resp.json()
+                    for trace in traces:
+                        ts = trace.get("started_at") or trace.get("created_at") or ""
+                        timeline.append({
+                            "type": "trace",
+                            "timestamp": ts,
+                            "title": trace.get("trace_id", ""),
+                            "status": trace.get("status", ""),
+                            "agent_id": str(trace.get("agent_id", "")),
+                            "details": {
+                                "trace_id": trace.get("trace_id"),
+                                "tool_call_count": trace.get("tool_call_count", 0),
+                                "session_id": trace.get("session_id", ""),
+                                "ended_at": trace.get("ended_at", ""),
+                            },
+                        })
+    except Exception:
+        pass  # AW unavailable — return tasks only
+
+    # Merge-sort by timestamp descending
+    timeline.sort(key=lambda x: x["timestamp"] or "", reverse=True)
+    return timeline[:limit]
+
+
 @app.post("/test/discord-notify")
 async def test_discord_notify():
     """Test Discord webhook notification."""

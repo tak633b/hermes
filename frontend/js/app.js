@@ -1192,6 +1192,73 @@ async function showAgentDetail(agentId) {
             taskTable.appendChild(tbody);
             taskSection.appendChild(taskTable);
         }
+
+        // Inline task creation form
+        const addTaskBtn = document.createElement('button');
+        addTaskBtn.className = 'btn btn-primary btn-small';
+        addTaskBtn.textContent = '+ タスク追加';
+        addTaskBtn.style.marginTop = '0.75rem';
+
+        const inlineTaskForm = document.createElement('div');
+        inlineTaskForm.style.cssText = 'display:none;margin-top:0.75rem;background:#f7fafc;padding:1rem;border-radius:6px;';
+
+        const inlineTitleInput = document.createElement('input');
+        inlineTitleInput.type = 'text';
+        inlineTitleInput.placeholder = 'タイトル';
+        inlineTitleInput.style.cssText = 'width:100%;margin-bottom:0.5rem;padding:0.4rem;border:1px solid #cbd5e0;border-radius:4px;box-sizing:border-box;';
+
+        const inlineDescInput = document.createElement('textarea');
+        inlineDescInput.placeholder = '説明（任意）';
+        inlineDescInput.rows = 2;
+        inlineDescInput.style.cssText = 'width:100%;margin-bottom:0.5rem;padding:0.4rem;border:1px solid #cbd5e0;border-radius:4px;box-sizing:border-box;';
+
+        const inlineSubmitBtn = document.createElement('button');
+        inlineSubmitBtn.className = 'btn btn-primary btn-small';
+        inlineSubmitBtn.textContent = '作成';
+
+        const inlineCancelBtn = document.createElement('button');
+        inlineCancelBtn.className = 'btn btn-secondary btn-small';
+        inlineCancelBtn.textContent = 'キャンセル';
+        inlineCancelBtn.style.marginLeft = '0.5rem';
+
+        inlineTaskForm.appendChild(inlineTitleInput);
+        inlineTaskForm.appendChild(inlineDescInput);
+        inlineTaskForm.appendChild(inlineSubmitBtn);
+        inlineTaskForm.appendChild(inlineCancelBtn);
+
+        addTaskBtn.addEventListener('click', () => {
+            inlineTaskForm.style.display = 'block';
+            addTaskBtn.style.display = 'none';
+            inlineTitleInput.focus();
+        });
+
+        inlineCancelBtn.addEventListener('click', () => {
+            inlineTaskForm.style.display = 'none';
+            addTaskBtn.style.display = '';
+            inlineTitleInput.value = '';
+            inlineDescInput.value = '';
+        });
+
+        inlineSubmitBtn.addEventListener('click', async () => {
+            const title = inlineTitleInput.value.trim();
+            if (!title) { inlineTitleInput.focus(); return; }
+            inlineSubmitBtn.disabled = true;
+            try {
+                await API.createTask(agentId, title, inlineDescInput.value.trim());
+                inlineTaskForm.style.display = 'none';
+                addTaskBtn.style.display = '';
+                inlineTitleInput.value = '';
+                inlineDescInput.value = '';
+                // Refresh the modal to show new task
+                showAgentDetail(agentId);
+            } catch (err) {
+                alert('タスク作成失敗: ' + err.message);
+                inlineSubmitBtn.disabled = false;
+            }
+        });
+
+        taskSection.appendChild(addTaskBtn);
+        taskSection.appendChild(inlineTaskForm);
         content.appendChild(taskSection);
 
         // Logs with real-time polling

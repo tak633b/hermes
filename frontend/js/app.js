@@ -307,7 +307,7 @@ function displayTasks(tasks) {
                 <div class="card-actions">
                     <button class="btn btn-primary btn-small" onclick="showTaskDetail('${task.id}')">詳細</button>
                     ${task.status === 'pending' || task.status === 'failed' ? `
-                        <button class="btn btn-success btn-small" onclick="executeTask('${task.id}')">▶ LLM実行</button>
+                        <button class="btn btn-success btn-small" onclick="executeTask('${task.id}')">▶ 実行エンジン</button>
                     ` : ''}
                     ${task.status === 'failed' ? `
                         <button class="btn btn-warning btn-small" onclick="retryTask('${task.id}')">再試行</button>
@@ -408,6 +408,62 @@ async function showAgentDetail(agentId) {
             });
         }
         content.appendChild(memSection);
+
+        // Tool Calls section
+        const toolCallSection = document.createElement('div');
+        toolCallSection.style.marginTop = '1.5rem';
+        const toolCallTitle = document.createElement('h4');
+        toolCallTitle.textContent = 'ツール設定（実行エンジン）';
+        toolCallSection.appendChild(toolCallTitle);
+
+        // Current tool_calls display
+        const currentToolCalls = agent.tool_calls || [];
+        const toolCallPre = document.createElement('pre');
+        toolCallPre.id = 'tool-calls-pre-' + agentId;
+        toolCallPre.style.cssText = 'background:#f7fafc;padding:0.75rem;border-radius:4px;font-size:0.82rem;overflow-x:auto;';
+        toolCallPre.textContent = JSON.stringify(currentToolCalls, null, 2) || '（未設定）';
+        toolCallSection.appendChild(toolCallPre);
+
+        // Edit tool_calls button
+        const editToolCallBtn = document.createElement('button');
+        editToolCallBtn.className = 'btn btn-warning btn-small';
+        editToolCallBtn.textContent = 'ツール編集';
+        editToolCallBtn.style.marginTop = '0.5rem';
+        editToolCallBtn.addEventListener('click', () => showToolCallEditor(agentId, currentToolCalls, toolCallPre));
+        toolCallSection.appendChild(editToolCallBtn);
+
+        // Quick add buttons
+        const quickAddDiv = document.createElement('div');
+        quickAddDiv.style.marginTop = '0.5rem';
+        const quickLabel = document.createElement('span');
+        quickLabel.style.cssText = 'font-size:0.8rem;color:#718096;margin-right:0.5rem;';
+        quickLabel.textContent = '素早く追加:';
+        quickAddDiv.appendChild(quickLabel);
+        [
+            {name: 'web_search', args: {query: 'example search'}},
+            {name: 'file_read', args: {path: '/tmp/example.txt'}},
+            {name: 'llm_call', args: {prompt: 'Summarize this task'}},
+        ].forEach(tc => {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-small';
+            btn.style.cssText = 'margin-right:4px;font-size:0.75rem;background:#e2e8f0;border:none;';
+            btn.textContent = '+ ' + tc.name;
+            btn.addEventListener('click', async () => {
+                const newToolCalls = [...(agent.tool_calls || []), tc];
+                try {
+                    await API.updateAgentToolCalls(agentId, newToolCalls);
+                    agent.tool_calls = newToolCalls;
+                    toolCallPre.textContent = JSON.stringify(newToolCalls, null, 2);
+                    btn.style.background = '#c6f6d5';
+                    setTimeout(() => { btn.style.background = '#e2e8f0'; }, 1000);
+                } catch (err) {
+                    alert('保存に失敗: ' + err.message);
+                }
+            });
+            quickAddDiv.appendChild(btn);
+        });
+        toolCallSection.appendChild(quickAddDiv);
+        content.appendChild(toolCallSection);
 
         // Tasks section
         const taskSection = document.createElement('div');
@@ -582,60 +638,175 @@ async function showAgentDetail(agentId) {
     }
 }
 
-async function showTaskDetail(taskId) {
+// Task log polling
+let taskLogInterval = null;
+
+async function refreshTaskLogs(taskId, logPre) {
     try {
-        const task = await API.getTask(taskId);
+        const logs = await API.getTaskLogs(taskId);
+        if (logs.length === 0) {
+            logPre.textContent = '（ログがありません）';
+        } else {
+            logPre.textContent = logs.map(l => {
+                let line = '[' + l.timestamp + '] [' + l.level.toUpperCase() + '] ' + l.message;
+                if (l.tool_name) {
+                    line += ' | ツール: ' + l.tool_name;
+                    if (l.tool_args) {
+                        try { line += ' args=' + JSON.stringify(JSON.parse(l.tool_args)); } catch (_) {}
+                    }
+                }
+                if (l.tool_result) {
+                    try {
+                        const preview = JSON.stringify(JSON.parse(l.tool_result)).substring(0, 120);
+                        line += '\n  → ' + preview + (preview.length >= 120 ? '…' : '');
+                    } catch (_) {}
+                }
+                return line;
+            }).join('\n');
+            logPre.scrollTop = logPre.scrollHeight;
+        }
+    } catch (_e) {}
+}
+
+async function showTaskDetail(taskId) {
+    if (taskLogInterval) { clearInterval(taskLogInterval); taskLogInterval = null; }
+
+    try {
+        const [task, taskLogs] = await Promise.all([API.getTask(taskId), API.getTaskLogs(taskId)]);
         const modal = document.getElementById('task-modal');
         const content = document.getElementById('task-detail-content');
-        
-        let resultHTML = '';
+        content.innerHTML = '';
+
+        const h2 = document.createElement('h2');
+        h2.textContent = task.title;
+        content.appendChild(h2);
+
+        const infoDiv = document.createElement('div');
+        infoDiv.style.marginTop = '1rem';
+        [['説明', task.description], ['ステータス', task.status], ['進捗', task.progress + '%'],
+         ['作成日時', new Date(task.created_at).toLocaleString('ja-JP')],
+         ['更新日時', new Date(task.updated_at).toLocaleString('ja-JP')]
+        ].forEach(([label, value]) => {
+            const p = document.createElement('p');
+            const strong = document.createElement('strong');
+            strong.textContent = label + ': ';
+            p.appendChild(strong);
+            if (label === 'ステータス') {
+                const span = document.createElement('span');
+                span.className = 'card-status status-' + value;
+                span.textContent = value;
+                p.appendChild(span);
+            } else {
+                p.appendChild(document.createTextNode(value));
+            }
+            infoDiv.appendChild(p);
+        });
+        content.appendChild(infoDiv);
+
+        if (task.status === 'pending') {
+            const execDiv = document.createElement('div');
+            execDiv.style.marginTop = '1rem';
+            const execBtn = document.createElement('button');
+            execBtn.className = 'btn btn-success';
+            execBtn.textContent = '▶ 実行エンジン起動';
+            execBtn.addEventListener('click', () => { closeModal('task-modal'); executeTask(task.id); });
+            execDiv.appendChild(execBtn);
+            content.appendChild(execDiv);
+        }
+
         if (task.result) {
-            resultHTML = `
-                <div style="margin-top: 1.5rem; padding: 1rem; background-color: #f7fafc; border-radius: 4px;">
-                    <h4>実行結果</h4>
-                    <pre style="background: white; padding: 1rem; border-radius: 4px; overflow-x: auto;">${JSON.stringify(task.result, null, 2)}</pre>
-                </div>
-            `;
+            const steps = task.result.steps || [];
+            const resultDiv = document.createElement('div');
+            resultDiv.style.cssText = 'margin-top:1.5rem;padding:1rem;background:#f7fafc;border-radius:4px;';
+            const rTitle = document.createElement('h4');
+            rTitle.textContent = '実行結果（' + steps.length + 'ステップ）';
+            resultDiv.appendChild(rTitle);
+            steps.forEach((s, i) => {
+                const stepDiv = document.createElement('div');
+                stepDiv.style.cssText = 'margin-top:0.75rem;padding:0.75rem;background:white;border-radius:4px;border-left:3px solid #4299e1;';
+                const strong = document.createElement('strong');
+                strong.textContent = (i + 1) + '. ' + s.tool;
+                stepDiv.appendChild(strong);
+                const pre = document.createElement('pre');
+                pre.style.cssText = 'margin:0.5rem 0 0;font-size:0.8rem;overflow-x:auto;';
+                pre.textContent = JSON.stringify(s.result, null, 2).substring(0, 500);
+                stepDiv.appendChild(pre);
+                resultDiv.appendChild(stepDiv);
+            });
+            content.appendChild(resultDiv);
         }
-        
-        let errorHTML = '';
+
         if (task.error) {
-            errorHTML = `
-                <div style="margin-top: 1.5rem; padding: 1rem; background-color: #fed7d7; border-radius: 4px; border-left: 4px solid #f56565;">
-                    <h4>エラー</h4>
-                    <p>${escapeHtml(task.error)}</p>
-                </div>
-            `;
+            const errorDiv = document.createElement('div');
+            errorDiv.style.cssText = 'margin-top:1.5rem;padding:1rem;background:#fed7d7;border-radius:4px;border-left:4px solid #f56565;';
+            const eTitle = document.createElement('h4');
+            eTitle.textContent = 'エラー';
+            errorDiv.appendChild(eTitle);
+            const eP = document.createElement('p');
+            eP.textContent = task.error;
+            errorDiv.appendChild(eP);
+            content.appendChild(errorDiv);
         }
-        
-        content.innerHTML = `
-            <h2>${escapeHtml(task.title)}</h2>
-            <div style="margin-top: 1rem;">
-                <p><strong>説明:</strong> ${escapeHtml(task.description)}</p>
-                <p><strong>ステータス:</strong> <span class="card-status status-${task.status}">${task.status}</span></p>
-                <p><strong>進捗:</strong> ${task.progress}%</p>
-                <p><strong>作成日時:</strong> ${new Date(task.created_at).toLocaleString('ja-JP')}</p>
-                <p><strong>更新日時:</strong> ${new Date(task.updated_at).toLocaleString('ja-JP')}</p>
-            </div>
-            ${resultHTML}
-            ${errorHTML}
-            ${task.status === 'failed' ? `
-                <div style="margin-top: 1.5rem;">
-                    <button class="btn btn-primary" onclick="retryTask('${task.id}')">再試行</button>
-                </div>
-            ` : ''}
-        `;
-        
+
+        if (task.status === 'failed') {
+            const retryDiv = document.createElement('div');
+            retryDiv.style.marginTop = '1.5rem';
+            const retryBtn = document.createElement('button');
+            retryBtn.className = 'btn btn-primary';
+            retryBtn.textContent = '再試行';
+            retryBtn.addEventListener('click', () => retryTask(task.id));
+            retryDiv.appendChild(retryBtn);
+            content.appendChild(retryDiv);
+        }
+
+        const logSection = document.createElement('div');
+        logSection.style.marginTop = '1.5rem';
+        const logHeader = document.createElement('div');
+        logHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;';
+        const logTitle = document.createElement('h4');
+        logTitle.textContent = '実行ログ（リアルタイム）';
+        logTitle.style.margin = '0';
+        logHeader.appendChild(logTitle);
+        const liveSpan = document.createElement('span');
+        liveSpan.style.cssText = 'font-size:0.75rem;color:#48bb78;';
+        liveSpan.textContent = '● LIVE';
+        logHeader.appendChild(liveSpan);
+        logSection.appendChild(logHeader);
+        const logPre = document.createElement('pre');
+        logPre.style.cssText = 'background:#1a202c;color:#e2e8f0;padding:1rem;border-radius:4px;overflow-x:auto;font-size:0.78rem;max-height:350px;overflow-y:auto;margin-top:0.5rem;';
+        logPre.textContent = taskLogs.length === 0 ? '（ログがありません）' : '';
+        logSection.appendChild(logPre);
+        content.appendChild(logSection);
+
+        if (taskLogs.length > 0) refreshTaskLogs(taskId, logPre);
+        if (task.status === 'running' || task.status === 'pending') {
+            taskLogInterval = setInterval(() => refreshTaskLogs(taskId, logPre), 2000);
+        }
+
         modal.classList.add('active');
     } catch (error) {
         alert('タスク情報の取得に失敗しました: ' + error.message);
     }
 }
 
+function showToolCallEditor(agentId, currentToolCalls, preElement) {
+    const json = JSON.stringify(currentToolCalls, null, 2);
+    const newJson = prompt('ツール設定をJSON形式で編集してください:\n例: [{"name":"web_search","args":{"query":"AI news"}}]', json);
+    if (newJson === null) return;
+    try {
+        const parsed = JSON.parse(newJson);
+        API.updateAgentToolCalls(agentId, parsed).then(() => {
+            preElement.textContent = JSON.stringify(parsed, null, 2);
+        }).catch(err => alert('保存に失敗: ' + err.message));
+    } catch (_) {
+        alert('JSONが不正です');
+    }
+}
+
 async function executeTask(taskId) {
     try {
         await API.executeTask(taskId);
-        alert('LLM実行を開始しました。ステータスが更新されます。');
+        alert('実行エンジンを起動しました。ステータスが更新されます。');
         loadTasks();
     } catch (error) {
         alert('実行開始に失敗しました: ' + error.message);
@@ -656,11 +827,8 @@ async function retryTask(taskId) {
 function closeModal(modalId) {
     const id = modalId || 'task-modal';
     document.getElementById(id).classList.remove('active');
-    // モーダルを閉じたらポーリング停止
-    if (agentLogInterval) {
-        clearInterval(agentLogInterval);
-        agentLogInterval = null;
-    }
+    if (agentLogInterval) { clearInterval(agentLogInterval); agentLogInterval = null; }
+    if (taskLogInterval) { clearInterval(taskLogInterval); taskLogInterval = null; }
     currentAgentId = null;
 }
 

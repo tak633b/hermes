@@ -54,6 +54,17 @@ class API {
         });
     }
 
+    static updateAgentToolCalls(id, toolCalls) {
+        return this.request(`/agents/${id}/tool_calls`, {
+            method: 'PUT',
+            body: JSON.stringify(toolCalls)
+        });
+    }
+
+    static getAvailableTools() {
+        return this.request('/tools');
+    }
+
     // Tasks
     static getTasks(agentId = null, status = null) {
         let endpoint = '/tasks';
@@ -100,6 +111,10 @@ class API {
         return this.request(`/tasks/${id}/execute`, {
             method: 'POST'
         });
+    }
+
+    static getTaskLogs(id) {
+        return this.request(`/tasks/${id}/logs`);
     }
 
     // Status

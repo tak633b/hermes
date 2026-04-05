@@ -683,6 +683,27 @@ async def create_task(task: Task):
              task.error, task.created_at, task.updated_at,
              task.priority, task.due_date, task.max_retries, task.retry_count)
         )
+        # Get agent name for notification
+        agent_row = conn.execute("SELECT name FROM agents WHERE id = ?", (task.agent_id,)).fetchone() if task.agent_id else None
+        agent_name = agent_row[0] if agent_row else "Unknown"
+
+    # Send Discord notification for new task assignment
+    priority_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(task.priority or "medium", "🟡")
+    fields = [
+        {"name": "エージェント", "value": agent_name, "inline": True},
+        {"name": "優先度", "value": f"{priority_emoji} {task.priority or 'medium'}", "inline": True},
+        {"name": "タスクID", "value": task.id[:8] + "...", "inline": True},
+    ]
+    if task.description:
+        fields.append({"name": "内容", "value": task.description[:500], "inline": False})
+    if task.due_date:
+        fields.append({"name": "期日", "value": task.due_date, "inline": True})
+    await send_discord_notification(
+        title=f"📋 新しいタスク: {task.title}",
+        description=f"**{agent_name}** に新しいタスクが割り当てられました。\n実行してください。",
+        color=0x5865F2,  # Discord Blurple
+        fields=fields,
+    )
     return task
 
 

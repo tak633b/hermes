@@ -699,7 +699,7 @@ async def create_task(task: Task):
         fields.append({"name": "内容", "value": task.description[:500], "inline": False})
     if task.due_date:
         fields.append({"name": "期日", "value": task.due_date, "inline": True})
-    fields.append({"name": "完了報告コマンド", "value": f"`curl -s -X PUT http://localhost:8010/tasks/{task.id}/status -H 'Content-Type: application/json' -d '{{\"status\":\"completed\"}}'`", "inline": False})
+    fields.append({"name": "完了報告コマンド", "value": f'`curl -s -X PUT http://localhost:8010/tasks/{task.id}/status -H \'Content-Type: application/json\' -d \'{{\"status\":\"completed\",\"result\":\"実行結果をここに\"}}\''+'`', "inline": False})
     await send_discord_notification(
         title=f"📋 新しいタスク: {task.title}",
         description=f"**{agent_name}** に新しいタスクが割り当てられました。\n実行してください。",
@@ -787,8 +787,9 @@ VALID_TASK_STATUSES = {"pending", "running", "completed", "failed", "cancelled"}
 
 @app.put("/tasks/{task_id}/status")
 async def update_task_status(task_id: str, body: dict = Body(...)):
-    """Update task status. Body: {"status": "running"|"completed"|"failed"|"cancelled"}"""
+    """Update task status. Body: {"status": "running"|"completed"|"failed"|"cancelled", "result": "optional comment"}"""
     new_status = body.get("status")
+    result_comment = body.get("result")
     if not new_status or new_status not in VALID_TASK_STATUSES:
         raise HTTPException(
             status_code=400,
@@ -817,10 +818,20 @@ async def update_task_status(task_id: str, body: dict = Body(...)):
         retry_count = row[4] or 0
         agent_id_for_retry = row[5]
 
-        if progress_val is not None:
+        if progress_val is not None and result_comment is not None:
+            conn.execute(
+                "UPDATE tasks SET status=?, progress=?, result=?, updated_at=? WHERE id=?",
+                (new_status, progress_val, result_comment, updated_at, task_id)
+            )
+        elif progress_val is not None:
             conn.execute(
                 "UPDATE tasks SET status=?, progress=?, updated_at=? WHERE id=?",
                 (new_status, progress_val, updated_at, task_id)
+            )
+        elif result_comment is not None:
+            conn.execute(
+                "UPDATE tasks SET status=?, result=?, updated_at=? WHERE id=?",
+                (new_status, result_comment, updated_at, task_id)
             )
         else:
             conn.execute(
@@ -858,6 +869,8 @@ async def update_task_status(task_id: str, body: dict = Body(...)):
         fields = [{"name": "Task", "value": task_title, "inline": True}]
         if agent_name:
             fields.append({"name": "Agent", "value": agent_name, "inline": True})
+        if result_comment:
+            fields.append({"name": "実行結果", "value": result_comment[:1000], "inline": False})
         if retried:
             fields.append({"name": "Auto-Retry", "value": f"再試行タスクを自動作成しました（{retry_count + 1}/{max_retries}）", "inline": False})
         await send_discord_notification(

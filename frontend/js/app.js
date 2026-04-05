@@ -719,15 +719,20 @@ async function loadTasks() {
     try {
         const status = document.getElementById('task-status-filter').value;
         const agentId = document.getElementById('task-agent-filter')?.value || null;
-        const tasks = await API.getTasks(agentId || null, status || null);
-        displayTasks(tasks);
+        const [tasks, agents] = await Promise.all([
+            API.getTasks(agentId || null, status || null),
+            API.getAgents().catch(() => [])
+        ]);
+        const agentMap = {};
+        agents.forEach(a => { agentMap[a.id] = a.name; });
+        displayTasks(tasks, agentMap);
     } catch (error) {
         console.error('Load tasks error:', error);
-        document.getElementById('tasks-list').innerHTML = `<p class="empty">エラー: ${error.message}</p>`;
+        document.getElementById('tasks-list').textContent = `エラー: ${error.message}`;
     }
 }
 
-function displayTasks(tasks) {
+function displayTasks(tasks, agentMap = {}) {
     const container = document.getElementById('tasks-list');
     
     if (tasks.length === 0) {
@@ -742,7 +747,7 @@ function displayTasks(tasks) {
                 <div class="card-header">
                     <div>
                         <div class="card-title">${escapeHtml(task.title)}</div>
-                        <div class="card-meta">Agent: ${escapeHtml(task.agent_id.substring(0, 8))}</div>
+                        <div class="card-meta">Agent: ${escapeHtml(agentMap[task.agent_id] || task.agent_id.substring(0, 8))}</div>
                     </div>
                     <span class="card-status ${statusClass}">${task.status}</span>
                 </div>

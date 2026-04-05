@@ -5,16 +5,17 @@ agent-whisper と連携してエージェントのトレース情報をリアル
 
 ## 特徴
 
-- 🤖 **エージェント管理** - 複数エージェントの登録・管理・ステータス監視
-- 📋 **タスク管理** - タスク作成・追跡・進捗監視・優先度設定・期日管理
-- 📊 **ダッシュボード** - リアルタイムステータス表示（WebSocket）
+- 🤖 **エージェント管理** - 複数エージェントの登録・管理・ステータス監視（リアルタイムバッジ更新）
+- 📋 **タスク管理** - タスク作成・追跡・進捗監視・優先度設定・期日管理（一覧にエージェント名表示）
+- 📊 **ダッシュボード** - リアルタイムステータス表示（WebSocket + ブラウザネイティブ通知）
 - 🔄 **自動リトライ** - 失敗タスクの自動再実行（max_retries 設定）
 - 🔗 **agent-whisper 連携** - エージェント詳細にトレース情報を統合表示・タイムライン統合ビュー
-- 🔔 **Discord 通知** - タスク作成時・ステータス変化時に Webhook 通知（バルへのタスク送信）
+- 🔔 **Discord 通知** - タスク作成時・ステータス変化時に Webhook 通知（フルUUID + 完了 curl コマンド付き）
 - 💾 **SQLite 永続化** - コンテナ再起動後もデータを保持（`./data/hermes.db`）
 - 📝 **タスクログ** - リアルタイムの実行ログ閲覧
 - 📈 **メトリクスダッシュボード** - Chart.js でエージェントごとのタスク統計を可視化
 - 🤖 **バル連携** - Discord 経由でバル（OpenClaw）にタスクを送信・進捗報告を受け取る
+- ✅ **UX 改善** - タスク作成後に自動で Tasks タブへ切り替え・Toast 通知
 
 ## アーキテクチャ
 
@@ -226,11 +227,11 @@ python3 scripts/hermes-report.py --task-id <id> --status completed --result "実
 python3 scripts/hermes-report.py --task-id <id> --log "ステップ1完了" --progress 50
 ```
 
-### Cron 設定（5分ごとにpendingタスクをチェック）
+### Cron 設定（15分ごとにpendingタスクをチェック）
 
 OpenClaw の `CronCreate` で以下を設定済み：
 ```
-*/5 * * * * python3 scripts/hermes-task-poller.py --once
+*/15 * * * * python3 scripts/hermes-task-poller.py --once
 ```
 
 ---

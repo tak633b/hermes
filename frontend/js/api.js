@@ -145,4 +145,14 @@ class API {
             return [];
         }
     }
+
+    static async searchAgentWhisperTraces(query, limit = 50) {
+        try {
+            const res = await fetch(`${AW_BASE_URL}/traces?q=${encodeURIComponent(query)}&limit=${limit}`);
+            if (!res.ok) return [];
+            return await res.json();
+        } catch (_e) {
+            return [];
+        }
+    }
 }

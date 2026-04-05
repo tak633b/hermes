@@ -19,6 +19,7 @@
             <button class="nav-btn active" data-tab="dashboard">📊 ダッシュボード</button>
             <button class="nav-btn" data-tab="agents">🤖 エージェント</button>
             <button class="nav-btn" data-tab="tasks">📋 タスク</button>
+            <button class="nav-btn" data-tab="trace-search">🔍 トレース検索</button>
         </nav>
 
         <!-- Dashboard Tab -->
@@ -90,6 +91,25 @@
 
             <div id="agents-list" class="agents-list">
                 <p class="empty">エージェントがありません</p>
+            </div>
+        </div>
+
+        <!-- Trace Search Tab -->
+        <div class="tab-content" id="trace-search">
+            <div class="section-header">
+                <h3>🔍 agent-whisper トレース検索</h3>
+            </div>
+            <div class="form-section">
+                <div class="form-group" style="display:flex;gap:0.5rem;align-items:flex-end;">
+                    <div style="flex:1">
+                        <label>キーワード検索（agent_id / tool_name / session_id）</label>
+                        <input type="text" id="trace-search-input" placeholder="例: bal-main, web_search, session:xxx" style="width:100%;">
+                    </div>
+                    <button class="btn btn-primary" id="trace-search-btn">検索</button>
+                </div>
+            </div>
+            <div id="trace-search-results">
+                <p class="empty">キーワードを入力して検索してください</p>
             </div>
         </div>
 

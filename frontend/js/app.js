@@ -151,6 +151,12 @@ function setupEventListeners() {
         document.getElementById('task-title').focus();
     });
 
+    // Trace search
+    document.getElementById('trace-search-btn').addEventListener('click', () => runTraceSearch());
+    document.getElementById('trace-search-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') runTraceSearch();
+    });
+
     document.getElementById('cancel-task-btn').addEventListener('click', () => {
         document.getElementById('create-task-form').style.display = 'none';
         document.getElementById('task-form').reset();
@@ -198,6 +204,67 @@ async function initializeApp() {
     } catch (error) {
         alert('バックエンドに接続できません: ' + error.message);
     }
+}
+
+function setEmptyMessage(container, text) {
+    container.textContent = '';
+    const p = document.createElement('p');
+    p.className = 'empty';
+    p.textContent = text;
+    container.appendChild(p);
+}
+
+async function runTraceSearch() {
+    const query = document.getElementById('trace-search-input').value.trim();
+    const container = document.getElementById('trace-search-results');
+    if (!query) {
+        setEmptyMessage(container, 'キーワードを入力してください');
+        return;
+    }
+    setEmptyMessage(container, '検索中...');
+    const traces = await API.searchAgentWhisperTraces(query);
+    if (traces.length === 0) {
+        setEmptyMessage(container, `「${query}」に一致するトレースが見つかりません`);
+        return;
+    }
+    const table = document.createElement('table');
+    table.style.cssText = 'width:100%;border-collapse:collapse;font-size:0.85rem;margin-top:0.5rem;';
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    headerRow.style.cssText = 'background:#edf2f7;text-align:left;';
+    ['Trace ID', 'Agent ID', '開始時刻', 'ツール数'].forEach(label => {
+        const th = document.createElement('th');
+        th.style.padding = '6px 8px';
+        th.textContent = label;
+        headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    traces.forEach((trace, i) => {
+        const tr = document.createElement('tr');
+        tr.style.background = i % 2 === 0 ? '#fff' : '#f7fafc';
+        const startedAt = trace.started_at ? new Date(trace.started_at).toLocaleString('ja-JP') : '-';
+        [
+            { text: trace.trace_id ? trace.trace_id.substring(0, 12) + '…' : '-', style: 'padding:5px 8px;font-family:monospace;' },
+            { text: String(trace.agent_id || '-'), style: 'padding:5px 8px;' },
+            { text: startedAt, style: 'padding:5px 8px;' },
+            { text: String(trace.tool_call_count || 0), style: 'padding:5px 8px;text-align:center;' },
+        ].forEach(cell => {
+            const td = document.createElement('td');
+            td.style.cssText = cell.style;
+            td.textContent = cell.text;
+            tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    container.textContent = '';
+    const summary = document.createElement('p');
+    summary.style.cssText = 'font-size:0.82rem;color:#718096;margin-bottom:0.5rem;';
+    summary.textContent = `${traces.length} 件のトレースが見つかりました（検索: "${query}"）`;
+    container.appendChild(summary);
+    container.appendChild(table);
 }
 
 function switchTab(tabName) {

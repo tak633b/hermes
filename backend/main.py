@@ -755,6 +755,16 @@ async def create_task(task: Task):
         color=0x5865F2,  # Discord Blurple
         fields=fields,
     )
+    # Broadcast task_created event to all WebSocket clients
+    await ws_manager.broadcast({
+        "event": "task_created",
+        "task_id": task.id,
+        "title": task.title,
+        "agent_id": task.agent_id,
+        "agent_name": agent_name,
+        "priority": task.priority or 0,
+        "created_at": task.created_at,
+    })
     return task
 
 

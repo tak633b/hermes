@@ -34,8 +34,36 @@ function connectWebSocket() {
     ws.onerror = () => { ws.close(); };
 }
 
+// Request notification permission on page load
+if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+}
+
+function showBrowserNotification(title, body, icon) {
+    if ('Notification' in window && Notification.permission === 'granted') {
+        const n = new Notification(title, {
+            body: body,
+            icon: icon || '/favicon.ico',
+            tag: 'hermes-' + Date.now(),
+        });
+        setTimeout(() => n.close(), 6000);
+    }
+}
+
 function handleWsMessage(msg) {
-    if (msg.event === 'task_status_changed') {
+    if (msg.event === 'task_created') {
+        const priorityLabel = msg.priority >= 2 ? '🔴 高' : msg.priority === 1 ? '🟡 中' : '🟢 通常';
+        showBrowserNotification(
+            `📋 新タスク: ${msg.title}`,
+            `担当: ${msg.agent_name || 'Unknown'} | 優先度: ${priorityLabel}`
+        );
+        showToast(`新タスク: ${msg.title}`);
+        // Reload task list if on tasks tab
+        const tasksTab = document.getElementById('tasks-section');
+        if (tasksTab && tasksTab.classList.contains('active')) {
+            loadTasks();
+        }
+    } else if (msg.event === 'task_status_changed') {
         // Update status badge in any visible task table
         const badge = document.getElementById('task-status-badge-' + msg.task_id);
         if (badge) {

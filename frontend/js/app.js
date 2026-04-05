@@ -424,12 +424,12 @@ async function showAgentDetail(agentId) {
     currentAgentId = agentId;
 
     try {
-        const [agent, logs, memory, agentTasks, awTraces] = await Promise.all([
-            API.getAgent(agentId),
+        const agent = await API.getAgent(agentId);
+        const [logs, memory, agentTasks, awTraces] = await Promise.all([
             API.getAgentLogs(agentId),
             API.getAgentMemory(agentId),
             API.getTasks(agentId),
-            API.getAgentWhisperTraces(agentId)
+            API.getAgentWhisperTraces(agent.name)
         ]);
 
         const modal = document.getElementById('agent-modal');

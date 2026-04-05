@@ -170,4 +170,11 @@ class API {
         if (!resp.ok) throw new Error('agent-whisper search failed');
         return await resp.json();
     }
+
+    static async getAllTraces(limit = 50) {
+        const url = `${AW_BASE_URL}/traces?limit=${limit}`;
+        const response = await fetch(url);
+        if (!response.ok) return [];
+        return response.json();
+    }
 }

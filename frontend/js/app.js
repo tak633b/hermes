@@ -195,6 +195,9 @@ function setupEventListeners() {
     document.getElementById('agent-modal').addEventListener('click', (e) => {
         if (e.target.id === 'agent-modal') closeModal('agent-modal');
     });
+
+    // AW Traces tab: debounce search
+    setupAwTracesTab();
 }
 
 async function initializeApp() {
@@ -313,28 +316,111 @@ async function runTraceSearch(offset = 0) {
 }
 
 function switchTab(tabName) {
-    // Hide all tabs
+    // Hide all tabs (both class-based and id-based)
     document.querySelectorAll('.tab-content').forEach(tab => {
         tab.classList.remove('active');
+        if (tab.id === 'tab-traces') tab.style.display = 'none';
     });
-    
+
     // Remove active from all nav buttons
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.classList.remove('active');
     });
-    
+
     // Show selected tab
-    document.getElementById(tabName).classList.add('active');
-    
+    if (tabName === 'traces') {
+        const tracesTab = document.getElementById('tab-traces');
+        tracesTab.style.display = 'block';
+    } else {
+        document.getElementById(tabName).classList.add('active');
+    }
+
     // Add active to clicked button
     event.target.classList.add('active');
-    
+
     // Load data for the tab
     if (tabName === 'agents') {
         loadAgents();
     } else if (tabName === 'tasks') {
         loadTasks();
+    } else if (tabName === 'traces') {
+        loadAwTraces();
     }
+}
+
+// AW Traces tab state
+let awTraceDebounceTimer = null;
+
+async function loadAwTraces(query = '') {
+    const container = document.getElementById('trace-list');
+    setEmptyMessage(container, '読み込み中...');
+    let traces;
+    try {
+        traces = await API.getAllTraces(50);
+        if (query) {
+            const q = query.toLowerCase();
+            traces = traces.filter(t =>
+                (t.agent_id && String(t.agent_id).toLowerCase().includes(q)) ||
+                (t.trace_id && String(t.trace_id).toLowerCase().includes(q)) ||
+                (t.session_id && String(t.session_id).toLowerCase().includes(q))
+            );
+        }
+    } catch (_e) {
+        setEmptyMessage(container, 'agent-whisper に接続できません');
+        return;
+    }
+
+    container.textContent = '';
+
+    if (!traces || traces.length === 0) {
+        setEmptyMessage(container, query ? '「' + query + '」に一致するトレースが見つかりません' : 'トレースがありません');
+        return;
+    }
+
+    const table = document.createElement('table');
+    table.style.cssText = 'width:100%;border-collapse:collapse;font-size:0.85rem;margin-top:0.5rem;';
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    headerRow.style.cssText = 'background:#edf2f7;text-align:left;';
+    ['Trace ID', 'Agent ID', '開始時刻', 'ツール数'].forEach(label => {
+        const th = document.createElement('th');
+        th.style.padding = '6px 8px';
+        th.textContent = label;
+        headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    traces.forEach((trace, i) => {
+        const tr = document.createElement('tr');
+        tr.style.background = i % 2 === 0 ? '#fff' : '#f7fafc';
+        const startedAt = trace.started_at ? new Date(trace.started_at).toLocaleString('ja-JP') : '-';
+        [
+            { text: trace.trace_id ? trace.trace_id.substring(0, 12) + '...' : '-', style: 'padding:5px 8px;font-family:monospace;' },
+            { text: String(trace.agent_id || '-'), style: 'padding:5px 8px;' },
+            { text: startedAt, style: 'padding:5px 8px;' },
+            { text: String(trace.tool_call_count || 0), style: 'padding:5px 8px;text-align:center;' },
+        ].forEach(cell => {
+            const td = document.createElement('td');
+            td.style.cssText = cell.style;
+            td.textContent = cell.text;
+            tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    container.appendChild(table);
+}
+
+function setupAwTracesTab() {
+    const searchInput = document.getElementById('trace-search');
+    if (!searchInput) return;
+    searchInput.addEventListener('input', () => {
+        clearTimeout(awTraceDebounceTimer);
+        awTraceDebounceTimer = setTimeout(() => {
+            loadAwTraces(searchInput.value.trim());
+        }, 300);
+    });
 }
 
 async function loadDashboard() {

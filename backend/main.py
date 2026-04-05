@@ -379,6 +379,12 @@ class AgentMemory(BaseModel):
     value: str
 
 
+class AgentUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+
+
 class Task(BaseModel):
     id: Optional[str] = None
     agent_id: str
@@ -455,24 +461,28 @@ async def get_agent(agent_id: str):
 
 
 @app.put("/agents/{agent_id}")
-async def update_agent(agent_id: str, body: dict = Body(...)):
-    """Update agent name, description, and/or parameters."""
-    allowed = {"name", "description", "parameters"}
-    updates = {k: v for k, v in body.items() if k in allowed}
-    if not updates:
-        raise HTTPException(status_code=400, detail="No valid fields to update")
+async def update_agent(agent_id: str, update: AgentUpdate):
     with get_db() as conn:
         row = conn.execute("SELECT id FROM agents WHERE id = ?", (agent_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Agent not found")
-        for field, value in updates.items():
-            if field == "parameters":
-                conn.execute(f"UPDATE agents SET {field} = ? WHERE id = ?",
-                             (json.dumps(value), agent_id))
-            else:
-                conn.execute(f"UPDATE agents SET {field} = ? WHERE id = ?",
-                             (value, agent_id))
-    return {"agent_id": agent_id, "updated": list(updates.keys())}
+        fields = []
+        values = []
+        if update.name is not None:
+            fields.append("name = ?")
+            values.append(update.name)
+        if update.description is not None:
+            fields.append("description = ?")
+            values.append(update.description)
+        if update.status is not None:
+            fields.append("status = ?")
+            values.append(update.status)
+        if not fields:
+            raise HTTPException(status_code=400, detail="No fields to update")
+        values.append(agent_id)
+        conn.execute(f"UPDATE agents SET {', '.join(fields)} WHERE id = ?", values)
+        updated = conn.execute("SELECT id, name, description, status, parameters, tool_calls, created_at FROM agents WHERE id = ?", (agent_id,)).fetchone()
+    return {"id": updated[0], "name": updated[1], "description": updated[2], "status": updated[3], "parameters": json.loads(updated[4] or "{}"), "tool_calls": json.loads(updated[5] or "[]"), "created_at": updated[6]}
 
 
 @app.put("/agents/{agent_id}/tool_calls")

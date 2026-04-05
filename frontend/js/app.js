@@ -388,7 +388,80 @@ async function showAgentDetail(agentId) {
         }
         content.appendChild(logSection);
 
+        // agent-whisper traces section
+        const awSection = document.createElement('div');
+        awSection.style.marginTop = '1.5rem';
+        const awTitle = document.createElement('h4');
+        awTitle.textContent = 'agent-whisper トレース';
+        awSection.appendChild(awTitle);
+        const awLoading = document.createElement('p');
+        awLoading.className = 'empty';
+        awLoading.textContent = '読み込み中...';
+        awSection.appendChild(awLoading);
+        content.appendChild(awSection);
+
         modal.classList.add('active');
+
+        // Fetch agent-whisper traces asynchronously after modal is shown
+        try {
+            const awResp = await fetch('http://localhost:9001/api/traces?q=' + encodeURIComponent(agent.name));
+            if (awResp.ok) {
+                const awTraces = await awResp.json();
+                awSection.removeChild(awLoading);
+                if (awTraces.length === 0) {
+                    const p = document.createElement('p');
+                    p.className = 'empty';
+                    p.textContent = 'トレースがありません（検索キー: ' + agent.name + '）';
+                    awSection.appendChild(p);
+                } else {
+                    const table = document.createElement('table');
+                    table.style.cssText = 'width:100%;border-collapse:collapse;font-size:0.82rem;';
+                    const thead = document.createElement('thead');
+                    const headerRow = document.createElement('tr');
+                    headerRow.style.cssText = 'background:#edf2f7;text-align:left;';
+                    ['Trace ID', 'Agent ID', '開始時刻', 'ツール数'].forEach(function(label) {
+                        const th = document.createElement('th');
+                        th.style.padding = '6px 8px';
+                        th.textContent = label;
+                        headerRow.appendChild(th);
+                    });
+                    thead.appendChild(headerRow);
+                    table.appendChild(thead);
+                    const tbody = document.createElement('tbody');
+                    awTraces.slice(0, 10).forEach(function(trace, i) {
+                        const tr = document.createElement('tr');
+                        tr.style.background = i % 2 === 0 ? '#fff' : '#f7fafc';
+                        const startedAt = trace.started_at
+                            ? new Date(trace.started_at).toLocaleString('ja-JP')
+                            : '-';
+                        [
+                            { text: trace.trace_id.substring(0, 8) + '…', style: 'padding:5px 8px;font-family:monospace;' },
+                            { text: String(trace.agent_id), style: 'padding:5px 8px;' },
+                            { text: startedAt, style: 'padding:5px 8px;' },
+                            { text: String(trace.tool_call_count), style: 'padding:5px 8px;text-align:center;' },
+                        ].forEach(function(cell) {
+                            const td = document.createElement('td');
+                            td.style.cssText = cell.style;
+                            td.textContent = cell.text;
+                            tr.appendChild(td);
+                        });
+                        tbody.appendChild(tr);
+                    });
+                    table.appendChild(tbody);
+                    awSection.appendChild(table);
+                    if (awTraces.length > 10) {
+                        const more = document.createElement('p');
+                        more.style.cssText = 'font-size:0.8rem;color:#718096;margin-top:0.5rem;';
+                        more.textContent = '…他 ' + (awTraces.length - 10) + ' 件（agent-whisper で確認）';
+                        awSection.appendChild(more);
+                    }
+                }
+            } else {
+                awLoading.textContent = 'agent-whisper に接続できません';
+            }
+        } catch (_err) {
+            awLoading.textContent = 'agent-whisper に接続できません（http://localhost:9001 が起動しているか確認）';
+        }
     } catch (error) {
         alert('エージェント情報の取得に失敗しました: ' + error.message);
     }

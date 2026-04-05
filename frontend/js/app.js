@@ -452,22 +452,96 @@ async function loadAwTraces(query = '') {
     thead.appendChild(headerRow);
     table.appendChild(thead);
     const tbody = document.createElement('tbody');
-    traces.forEach((trace, i) => {
+    traces.forEach(function(trace, i) {
         const tr = document.createElement('tr');
         tr.style.background = i % 2 === 0 ? '#fff' : '#f7fafc';
+        tr.style.cursor = 'pointer';
+        tr.title = 'クリックでツール詳細を表示';
         const startedAt = trace.started_at ? new Date(trace.started_at).toLocaleString('ja-JP') : '-';
         [
             { text: trace.trace_id ? trace.trace_id.substring(0, 12) + '...' : '-', style: 'padding:5px 8px;font-family:monospace;' },
             { text: String(trace.agent_id || '-'), style: 'padding:5px 8px;' },
             { text: startedAt, style: 'padding:5px 8px;' },
             { text: String(trace.tool_call_count || 0), style: 'padding:5px 8px;text-align:center;' },
-        ].forEach(cell => {
+            { text: '▶ 詳細', style: 'padding:5px 8px;color:#4299e1;font-size:0.8rem;' },
+        ].forEach(function(cell) {
             const td = document.createElement('td');
             td.style.cssText = cell.style;
             td.textContent = cell.text;
             tr.appendChild(td);
         });
+
+        const detailRow = document.createElement('tr');
+        detailRow.style.display = 'none';
+        const detailTd = document.createElement('td');
+        detailTd.colSpan = 5;
+        detailTd.style.cssText = 'padding:0;background:#f0f4f8;';
+        detailRow.appendChild(detailTd);
+
+        tr.addEventListener('click', async function() {
+            if (detailRow.style.display !== 'none') {
+                detailRow.style.display = 'none';
+                tr.querySelector('td:last-child').textContent = '▶ 詳細';
+                return;
+            }
+            tr.querySelector('td:last-child').textContent = '⏳ 読み込み中...';
+            try {
+                const res = await fetch(AW_BASE_URL + '/traces/' + trace.trace_id + '/tool_calls');
+                const toolCalls = res.ok ? await res.json() : [];
+                while (detailTd.firstChild) { detailTd.removeChild(detailTd.firstChild); }
+                if (!toolCalls.length) {
+                    detailTd.textContent = 'ツール呼び出しなし';
+                    detailTd.style.padding = '8px 16px';
+                } else {
+                    const inner = document.createElement('div');
+                    inner.style.cssText = 'padding:8px 16px;max-height:300px;overflow-y:auto;';
+                    toolCalls.forEach(function(tc, idx) {
+                        const item = document.createElement('div');
+                        item.style.cssText = 'border-left:3px solid #4299e1;padding:6px 10px;margin-bottom:6px;background:#fff;border-radius:0 4px 4px 0;font-size:0.82rem;';
+                        const header = document.createElement('div');
+                        header.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:4px;';
+                        const badge = document.createElement('span');
+                        badge.style.cssText = 'font-family:monospace;font-weight:bold;color:#2b6cb0;';
+                        badge.textContent = '[' + (idx+1) + '] ' + tc.tool_name;
+                        const tsSpan = document.createElement('span');
+                        tsSpan.style.cssText = 'color:#718096;font-size:0.75rem;';
+                        tsSpan.textContent = tc.timestamp ? new Date(tc.timestamp).toLocaleTimeString('ja-JP') : '';
+                        header.appendChild(badge);
+                        header.appendChild(tsSpan);
+                        if (tc.duration_ms) {
+                            const dur = document.createElement('span');
+                            dur.style.cssText = 'color:#718096;font-size:0.75rem;margin-left:auto;';
+                            dur.textContent = tc.duration_ms + 'ms';
+                            header.appendChild(dur);
+                        }
+                        item.appendChild(header);
+                        if (tc.input_str) {
+                            const inp = document.createElement('div');
+                            inp.style.cssText = 'color:#4a5568;margin-bottom:2px;word-break:break-all;';
+                            inp.textContent = '入力: ' + tc.input_str.slice(0, 200);
+                            item.appendChild(inp);
+                        }
+                        if (tc.output) {
+                            const out = document.createElement('div');
+                            const isErr = tc.output.startsWith('[ERROR]');
+                            out.style.cssText = 'word-break:break-all;color:' + (isErr ? '#c53030' : '#276749') + ';';
+                            out.textContent = '出力: ' + tc.output.slice(0, 200);
+                            item.appendChild(out);
+                        }
+                        inner.appendChild(item);
+                    });
+                    detailTd.appendChild(inner);
+                }
+            } catch (e) {
+                detailTd.textContent = '取得失敗: ' + e.message;
+                detailTd.style.padding = '8px 16px';
+            }
+            detailRow.style.display = '';
+            tr.querySelector('td:last-child').textContent = '▼ 閉じる';
+        });
+
         tbody.appendChild(tr);
+        tbody.appendChild(detailRow);
     });
     table.appendChild(tbody);
     container.appendChild(table);

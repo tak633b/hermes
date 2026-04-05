@@ -13,6 +13,32 @@ import asyncio
 import time
 import os
 
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+
+STATUS_COLORS = {
+    "completed": 0x57F287,  # green
+    "failed": 0xED4245,     # red
+    "running": 0x5865F2,    # blurple
+    "cancelled": 0x95A5A6,  # grey
+    "pending": 0xFEE75C,    # yellow
+}
+
+
+async def send_discord_notification(title: str, description: str, color: int, fields: list[dict] | None = None) -> None:
+    if not DISCORD_WEBHOOK_URL:
+        return
+    embed: dict = {"title": title, "description": description, "color": color,
+                   "timestamp": datetime.utcnow().isoformat()}
+    if fields:
+        embed["fields"] = fields
+    payload = {"embeds": [embed]}
+    try:
+        async with aiohttp.ClientSession() as session:
+            await session.post(DISCORD_WEBHOOK_URL, json=payload)
+    except Exception:
+        pass  # never block the main flow on notification errors
+
+
 app = FastAPI(title="Hermes Agent Orchestration")
 
 # WebSocket connection manager
@@ -467,6 +493,36 @@ async def get_agent_memory(agent_id: str):
     return [dict(r) for r in rows]
 
 
+@app.put("/agents/{agent_id}/status")
+async def update_agent_status(agent_id: str, body: dict = Body(...)):
+    """Update agent status. Body: {"status": "idle"|"running"|"completed"|"error"}"""
+    new_status = body.get("status")
+    if not new_status:
+        raise HTTPException(status_code=400, detail="status is required")
+
+    with get_db() as conn:
+        row = conn.execute("SELECT name FROM agents WHERE id = ?", (agent_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        agent_name = row[0]
+        conn.execute("UPDATE agents SET status = ? WHERE id = ?", (new_status, agent_id))
+
+    await ws_manager.broadcast({
+        "event": "agent_status_changed",
+        "agent_id": agent_id,
+        "status": new_status,
+    })
+
+    status_emoji = {"running": "🤖", "completed": "✅", "error": "❌", "idle": "💤"}.get(new_status, "📌")
+    await send_discord_notification(
+        title=f"{status_emoji} Agent Status: {new_status.capitalize()}",
+        description=f"**{agent_name}** is now **{new_status}**",
+        color=STATUS_COLORS.get(new_status, 0x99AAB5),
+        fields=[{"name": "Agent ID", "value": agent_id, "inline": True}],
+    )
+    return {"agent_id": agent_id, "status": new_status}
+
+
 @app.put("/agents/{agent_id}/memory")
 async def update_agent_memory(agent_id: str, memory: AgentMemory):
     with get_db() as conn:
@@ -598,10 +654,17 @@ async def update_task_status(task_id: str, body: dict = Body(...)):
     progress_map = {"running": 50, "completed": 100, "failed": None, "cancelled": None, "pending": 0}
     progress_val = progress_map.get(new_status)
 
+    task_title = task_id
+    agent_name = None
     with get_db() as conn:
-        row = conn.execute("SELECT id FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        row = conn.execute(
+            "SELECT tasks.id, tasks.title, agents.name FROM tasks LEFT JOIN agents ON tasks.agent_id = agents.id WHERE tasks.id = ?",
+            (task_id,)
+        ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Task not found")
+        task_title = row[1] or task_id
+        agent_name = row[2]
         if progress_val is not None:
             conn.execute(
                 "UPDATE tasks SET status=?, progress=?, updated_at=? WHERE id=?",
@@ -619,6 +682,19 @@ async def update_task_status(task_id: str, body: dict = Body(...)):
         "status": new_status,
         "updated_at": updated_at,
     })
+
+    if new_status in {"completed", "failed", "cancelled"}:
+        status_emoji = {"completed": "✅", "failed": "❌", "cancelled": "⏹️"}.get(new_status, "")
+        fields = [{"name": "Task", "value": task_title, "inline": True}]
+        if agent_name:
+            fields.append({"name": "Agent", "value": agent_name, "inline": True})
+        await send_discord_notification(
+            title=f"{status_emoji} Task {new_status.capitalize()}",
+            description=f"Task status changed to **{new_status}**",
+            color=STATUS_COLORS.get(new_status, 0x99AAB5),
+            fields=fields,
+        )
+
     return {"task_id": task_id, "status": new_status, "updated_at": updated_at}
 
 

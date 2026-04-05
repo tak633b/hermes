@@ -306,6 +306,9 @@ function displayTasks(tasks) {
                 ` : ''}
                 <div class="card-actions">
                     <button class="btn btn-primary btn-small" onclick="showTaskDetail('${task.id}')">詳細</button>
+                    ${task.status === 'pending' || task.status === 'failed' ? `
+                        <button class="btn btn-success btn-small" onclick="executeTask('${task.id}')">▶ LLM実行</button>
+                    ` : ''}
                     ${task.status === 'failed' ? `
                         <button class="btn btn-warning btn-small" onclick="retryTask('${task.id}')">再試行</button>
                     ` : ''}
@@ -626,6 +629,16 @@ async function showTaskDetail(taskId) {
         modal.classList.add('active');
     } catch (error) {
         alert('タスク情報の取得に失敗しました: ' + error.message);
+    }
+}
+
+async function executeTask(taskId) {
+    try {
+        await API.executeTask(taskId);
+        alert('LLM実行を開始しました。ステータスが更新されます。');
+        loadTasks();
+    } catch (error) {
+        alert('実行開始に失敗しました: ' + error.message);
     }
 }
 

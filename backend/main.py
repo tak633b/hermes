@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Query, Depends
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime
@@ -7,6 +7,7 @@ import uuid
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
+import llm_client
 
 app = FastAPI(title="Hermes Agent Orchestration")
 
@@ -289,6 +290,81 @@ async def update_task(task_id: str, task: Task):
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
+
+
+def _run_task_with_llm(task_id: str):
+    """バックグラウンドでLLMタスクを実行し、結果をDBに保存する"""
+    import json as _json
+    try:
+        with get_db() as conn:
+            task_row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            if not task_row:
+                return
+            task = dict(task_row)
+            agent_row = conn.execute("SELECT * FROM agents WHERE id = ?", (task["agent_id"],)).fetchone()
+            if not agent_row:
+                return
+            agent = dict(agent_row)
+
+            # ステータスを running に
+            now = datetime.utcnow().isoformat()
+            conn.execute(
+                "UPDATE tasks SET status='running', progress=10, updated_at=? WHERE id=?",
+                (now, task_id)
+            )
+            # ログ記録
+            conn.execute(
+                "INSERT INTO agent_logs (agent_id, timestamp, level, message) VALUES (?, ?, ?, ?)",
+                (agent["id"], now, "info", f"タスク開始: {task['title']}")
+            )
+
+        result = llm_client.execute_task(
+            agent_name=agent["name"],
+            agent_description=agent["description"],
+            task_title=task["title"],
+            task_description=task["description"]
+        )
+
+        finished_at = datetime.utcnow().isoformat()
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE tasks SET status='completed', progress=100, result=?, updated_at=? WHERE id=?",
+                (_json.dumps(result, ensure_ascii=False), finished_at, task_id)
+            )
+            conn.execute(
+                "INSERT INTO agent_logs (agent_id, timestamp, level, message) VALUES (?, ?, ?, ?)",
+                (agent["id"], finished_at, "info",
+                 f"タスク完了: {task['title']} | 入力{result['usage']['input_tokens']}トークン / 出力{result['usage']['output_tokens']}トークン")
+            )
+    except Exception as e:
+        error_msg = str(e)
+        err_at = datetime.utcnow().isoformat()
+        try:
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE tasks SET status='failed', error=?, updated_at=? WHERE id=?",
+                    (error_msg, err_at, task_id)
+                )
+                conn.execute(
+                    "INSERT INTO agent_logs (agent_id, timestamp, level, message) VALUES (?, ?, ?, ?)",
+                    (task.get("agent_id", ""), err_at, "error", f"タスク失敗: {error_msg}")
+                )
+        except Exception:
+            pass
+
+
+@app.post("/tasks/{task_id}/execute")
+async def execute_task(task_id: str, background_tasks: BackgroundTasks):
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task = dict(row)
+    if task["status"] not in ("pending", "failed"):
+        raise HTTPException(status_code=400, detail=f"Cannot execute task with status '{task['status']}'")
+
+    background_tasks.add_task(_run_task_with_llm, task_id)
+    return {"status": "started", "task_id": task_id}
 
 
 @app.put("/tasks/{task_id}/retry")

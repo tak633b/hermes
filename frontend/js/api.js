@@ -96,6 +96,12 @@ class API {
         });
     }
 
+    static executeTask(id) {
+        return this.request(`/tasks/${id}/execute`, {
+            method: 'POST'
+        });
+    }
+
     // Status
     static getStatus() {
         return this.request('/status');

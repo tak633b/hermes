@@ -10,6 +10,8 @@ services:
       - "8010:8000"
     volumes:
       - ./backend/data:/app/data
+    env_file:
+      - .env
     environment:
       - PYTHONUNBUFFERED=1
     command: python main.py

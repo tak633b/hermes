@@ -69,7 +69,7 @@ ws_manager = ConnectionManager()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -206,10 +206,18 @@ def tool_web_search(query: str) -> dict:
     }
 
 
+# file_read is sandboxed to this base directory to prevent arbitrary file
+# disclosure (the API is unauthenticated and reachable cross-origin).
+FILE_READ_BASE = Path(os.environ.get("HERMES_FILE_READ_BASE", ".")).resolve()
+
+
 def tool_file_read(path: str) -> dict:
-    """ファイル読み込み"""
+    """ファイル読み込み（FILE_READ_BASE配下に制限）"""
     try:
         p = Path(path)
+        p = (p if p.is_absolute() else FILE_READ_BASE / p).resolve()
+        if p != FILE_READ_BASE and FILE_READ_BASE not in p.parents:
+            return {"error": "Access denied: path is outside the allowed directory", "content": None}
         if not p.exists():
             return {"error": f"File not found: {path}", "content": None}
         if not p.is_file():
@@ -1223,7 +1231,7 @@ async def test_discord_notify():
         color=5763719,
         fields=[{"name": "送信元", "value": "Hermes API /test/discord-notify", "inline": True}]
     )
-    return {"status": "sent", "webhook_url": DISCORD_WEBHOOK_URL[:50] + "..."}
+    return {"status": "sent"}
 
 
 if __name__ == "__main__":

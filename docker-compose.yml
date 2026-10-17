@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   backend:
     build:
@@ -33,6 +31,3 @@ services:
 networks:
   agent-whisper_default:
     external: true
-
-volumes:
-  hermes_data:

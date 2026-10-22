@@ -14,6 +14,8 @@ import time
 import os
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+# agent-whisper API (Docker 内部名が既定。ホスト側に向けるなら .env の AW_BASE_URL)
+AW_BASE_URL = os.environ.get("AW_BASE_URL", "http://agent-whisper:8000")
 
 STATUS_COLORS = {
     "completed": 0x57F287,  # green
@@ -472,7 +474,7 @@ async def get_agents_health():
 
             aw_last_trace_at = None
             try:
-                aw_url = os.environ.get("AW_BASE_URL", "http://agent-whisper:8000")
+                aw_url = AW_BASE_URL
                 async with aiohttp.ClientSession() as session:
                     async with session.get(
                         f"{aw_url}/traces",
@@ -973,7 +975,7 @@ async def get_agent_whisper_traces(agent_id: Optional[str] = Query(None)):
     import asyncio
     
     try:
-        agent_whisper_url = "http://agent-whisper:8000"  # Docker internal name
+        agent_whisper_url = AW_BASE_URL
         endpoint = "/api/traces"
         params = {}
         if agent_id:
@@ -1145,7 +1147,7 @@ async def get_timeline(
 
     # Fetch agent-whisper traces
     try:
-        aw_url = "http://agent-whisper:8000"
+        aw_url = AW_BASE_URL
         aw_params: dict = {"limit": limit}
         if agent_id:
             aw_params["agent_id"] = agent_id

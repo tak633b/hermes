@@ -74,11 +74,16 @@ docker compose up -d --build
 
 ## 環境変数（`.env`）
 
+`docker-compose.yml` が `env_file: .env` を読むため、`.env` が無いと起動に失敗します。先に `cp .env.example .env` してください。
+
 ```env
 # Discord Webhook（エージェント/タスクの状態変化を通知）
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/xxx/yyy
 
-# Anthropic API Key（将来のAI機能用）
+# agent-whisper API の URL（既定はコンテナ内部名 http://agent-whisper:8000）
+AW_BASE_URL=http://host.docker.internal:8000
+
+# Anthropic API Key（将来のAI機能用、任意）
 ANTHROPIC_API_KEY=
 ```
 
@@ -159,6 +164,7 @@ Hermes と [agent-whisper](https://github.com/tak633b/agent-whisper) を連携�
 hermes/
 ├── backend/
 │   ├── main.py           # FastAPI アプリケーション
+│   ├── llm_client.py     # Anthropic API クライアント（将来のAI機能用）
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   └── data/
@@ -170,9 +176,13 @@ hermes/
 │   │   └── app.js        # アプリケーションロジック
 │   └── css/
 │       └── style.css
+├── scripts/
+│   ├── hermes-task-poller.py  # pending タスクの取得（エージェント側）
+│   └── hermes-report.py       # 進捗・結果の報告（エージェント側）
 ├── nginx.conf
 ├── docker-compose.yml
 ├── .env                  # 環境変数（.gitignore）
+├── DEVELOPMENT.md        # 開発ガイド（スキーマ・ロードマップ）
 └── README.md
 ```
 
@@ -184,6 +194,10 @@ hermes/
 docker logs hermes-backend
 docker compose down && docker compose up -d --build
 ```
+
+### `network agent-whisper_default declared as external, but could not be found`
+
+`docker-compose.yml` は agent-whisper の Docker ネットワークに参加する前提です。agent-whisper を使わない場合は、`backend` サービスの `networks` と末尾の `networks:` ブロックを削除してください。
 
 ### agent-whisper トレースが表示されない
 
